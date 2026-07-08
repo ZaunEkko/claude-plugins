@@ -1,0 +1,20 @@
+{
+  "name": "ekko-plugin-scaffold",
+  "version": "0.1.0",
+  "description": "A temporary Claude Code plugin scaffold by ZaunEkko. Future published plugins should use purpose-first names like ekko-agy-cli.",
+  "author": {
+    "name": "ZaunEkko",
+    "url": "https://github.com/ZaunEkko"
+  },
+  "repository": "https://github.com/ZaunEkko/claude-plugins",
+  "homepage": "https://github.com/ZaunEkko/claude-plugins#readme",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-plugin",
+    "plugin-scaffold",
+    "skills",
+    "agents",
+    "mcp"
+  ]
+}

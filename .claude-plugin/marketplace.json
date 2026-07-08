@@ -1,0 +1,15 @@
+{
+  "name": "zaunekko",
+  "description": "ZaunEkko's private-first Claude Code plugin marketplace for purpose-specific ekko-* plugins.",
+  "owner": {
+    "name": "ZaunEkko",
+    "url": "https://github.com/ZaunEkko"
+  },
+  "plugins": [
+    {
+      "name": "ekko-plugin-scaffold",
+      "source": "./plugins/ekko-plugin-scaffold",
+      "description": "A temporary Claude Code plugin scaffold by ZaunEkko. Future published plugins should use purpose-first names like ekko-agy-cli."
+    }
+  ]
+}
