@@ -51,6 +51,31 @@ claude plugin install ekko-plugin-scaffold@zaunekko
 
 If adding a new plugin, validate its manifest with the same `python -m json.tool plugins/<plugin-name>/.claude-plugin/plugin.json >/dev/null` pattern and update `.claude-plugin/marketplace.json`.
 
+## Git Flow
+
+Use Git Flow for repository work:
+
+- `main` is the stable branch for released or release-ready marketplace state.
+- `develop` is the integration branch for ongoing plugin work.
+- Create feature branches from `develop` using `feature/<purpose>`, for example `feature/ekko-agy-cli`.
+- Merge completed features back into `develop` after validation.
+- Use `release/<version-or-purpose>` when preparing a release candidate from `develop` to `main`.
+- Use `hotfix/<purpose>` only for urgent fixes based on `main`.
+- Do not commit directly to `main` except for initial bootstrapping or explicit release/hotfix work.
+
+Before merging a branch, run:
+
+```bash
+python -m json.tool .claude-plugin/marketplace.json >/dev/null
+claude plugin validate .
+```
+
+When a branch changes a specific plugin, also validate that plugin's manifest:
+
+```bash
+python -m json.tool plugins/<plugin-name>/.claude-plugin/plugin.json >/dev/null
+```
+
 ## Development workflow
 
 When adding a real plugin:
