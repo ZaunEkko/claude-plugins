@@ -4,8 +4,9 @@ Thanks for your interest in improving `claude-plugins`.
 
 ## Component guidelines
 
-- Name installable plugins with `ekko-<specific-purpose>`; avoid generic names such as `claude-plugins`, `ekko-plugins`, or `ekko-skills`.
-- Prefer new capabilities as skills in `skills/<skill-name>/SKILL.md`.
+- Name original installable plugins with `ekko-<specific-purpose>`; avoid generic names such as `claude-plugins`, `ekko-plugins`, or `ekko-skills`.
+- Use a same-name upstream compatibility exception only when preserving the upstream installation and command namespace is required. Record the source, license, hashes, copied files, modified files, and local additions in the plugin directory.
+- Prefer new capabilities as skills in `skills/<skill-name>/SKILL.md`; use `commands/` only for documented legacy compatibility.
 - Keep each skill focused on one clear workflow or body of knowledge.
 - Use kebab-case names for directories and files.
 - Avoid hardcoded machine-specific paths, credentials, or local-only assumptions.

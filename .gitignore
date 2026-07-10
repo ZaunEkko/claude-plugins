@@ -19,6 +19,7 @@ build/
 .cache/
 .tmp/
 tmp/
+/temp/
 
 # Logs
 *.log

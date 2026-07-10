@@ -1,73 +1,91 @@
 # claude-plugins
 
-A Claude Code plugin marketplace by [ZaunEkko](https://github.com/ZaunEkko).
+A private-first Claude Code plugin marketplace by [ZaunEkko](https://github.com/ZaunEkko).
 
-This repository is intentionally starting as a **marketplace-ready scaffold**. It hosts a temporary initial plugin named `ekko-plugin-scaffold`, with empty component directories prepared for future skills, agents, hooks, scripts, and MCP integrations.
+## Marketplace
 
-## Status
-
-- Marketplace source: `ZaunEkko/claude-plugins`
+- Source repository: `ZaunEkko/claude-plugins`
 - Marketplace name: `zaunekko`
-- Current scaffold plugin: `ekko-plugin-scaffold`
-- Current scaffold install identity: `ekko-plugin-scaffold@zaunekko`
-- Initial version: `0.1.0`
-- Current components: none yet
-- License plan: MIT
-- Repository visibility: private first; public marketplace distribution later
+- Distribution status: private during development; public access can be enabled later
+
+## Available plugins
+
+| Plugin | Install identity | Status | License |
+|---|---|---|---|
+| `ekko-plugin-scaffold` | `ekko-plugin-scaffold@zaunekko` | Temporary empty scaffold | MIT |
+| `commit-commands` | `commit-commands@zaunekko` | Third-party compatibility distribution with dynamic model attribution | Apache-2.0 |
+
+### `commit-commands`
+
+`commit-commands@zaunekko` is derived from Anthropic's official `commit-commands` plugin. It preserves `/commit-commands:commit`, `/commit-commands:commit-push-pr`, and `/commit-commands:clean_gone`, while routing commits through a deterministic wrapper that replaces an existing attribution `Model:` line with the current session model.
+
+The official and ZaunEkko distributions have the same plugin and command names. Enable exactly one:
+
+```json
+{
+  "enabledPlugins": {
+    "commit-commands@claude-plugins-official": false,
+    "commit-commands@zaunekko": true
+  }
+}
+```
+
+See [`plugins/commit-commands/README.md`](plugins/commit-commands/README.md) for behavior, installation, runtime requirements, tests, privacy details, and upstream provenance.
 
 ## Naming convention
 
-Installable plugins in this marketplace should use:
+Original installable plugins should use:
 
 ```text
 ekko-<specific-purpose>
 ```
 
-Use names that remain clear in `/plugins` even when the marketplace source is not visible.
+Examples include `ekko-agy-cli`, `ekko-notion-tasks`, and `ekko-browser-debug`. Avoid generic original plugin names such as `tools`, `utils`, `ekko-plugins`, or `claude-plugins`.
 
-Recommended examples:
-
-- `ekko-agy-cli` — operates the `agy` CLI from Claude Code.
-- `ekko-notion-tasks` — manages Notion task workflows.
-- `ekko-browser-debug` — drives browser debugging workflows.
-
-Avoid generic installable plugin names:
-
-- `claude-plugins`
-- `ekko-plugins`
-- `ekko-skills`
-- `tools`
-- `utils`
-
-The repository can stay generic (`claude-plugins`) because it is the marketplace container. Individual plugins should be purpose-specific.
+A documented exception is allowed for a licensed, same-name compatibility distribution that must preserve an upstream plugin's installation and command namespace. `commit-commands` is such an exception; its source, license, hashes, and modifications are recorded in [`UPSTREAM.md`](plugins/commit-commands/UPSTREAM.md).
 
 ## Installation
 
-This repository is intended to start as a private marketplace while plugins are being developed and tested. Public installation instructions below apply after the repository is made accessible to the target users.
-
-After this repository is published and available to Claude Code, users can add this marketplace and install the current scaffold plugin:
+Add the marketplace:
 
 ```text
 /plugin marketplace add ZaunEkko/claude-plugins
-/plugin install ekko-plugin-scaffold@zaunekko
 ```
 
-The GitHub repository identifies the marketplace source. The install name follows Claude Code's `<plugin>@<marketplace>` convention.
+Install a plugin by its marketplace identity:
+
+```text
+/plugin install ekko-plugin-scaffold@zaunekko
+/plugin install commit-commands@zaunekko
+```
+
+For local development from this checkout:
+
+```bash
+claude plugin marketplace add --scope local "D:/project/coding/project/github/claude-plugins"
+claude plugin install --scope local commit-commands@zaunekko
+```
+
+Use local scope for compatibility-plugin testing so existing user-scope marketplace and official plugin settings remain untouched.
 
 ## Repository layout
 
 ```text
 claude-plugins/
 ├── .claude-plugin/
-│   └── marketplace.json                  # Claude Code marketplace catalog
+│   └── marketplace.json
 ├── plugins/
-│   └── ekko-plugin-scaffold/
-│       ├── .claude-plugin/
-│       │   └── plugin.json               # Temporary scaffold plugin manifest
-│       ├── skills/                       # Future skills: skills/<skill-name>/SKILL.md
-│       ├── agents/                       # Future agent definitions: agents/<agent-name>.md
-│       ├── hooks/                        # Future hook config: hooks/hooks.json
-│       └── scripts/                      # Future helper scripts used by plugin components
+│   ├── ekko-plugin-scaffold/
+│   │   └── .claude-plugin/plugin.json
+│   └── commit-commands/
+│       ├── .claude-plugin/plugin.json
+│       ├── commands/
+│       ├── hooks/hooks.json
+│       ├── scripts/
+│       ├── tests/
+│       ├── LICENSE
+│       ├── README.md
+│       └── UPSTREAM.md
 ├── docs/
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
@@ -75,90 +93,35 @@ claude-plugins/
 └── README.md
 ```
 
-Claude Code discovers plugin components inside the installed plugin directory by convention. In this repository, the current scaffold plugin lives at `plugins/ekko-plugin-scaffold/`:
-
-- Skills live in `plugins/ekko-plugin-scaffold/skills/<skill-name>/SKILL.md`.
-- Agents live in `plugins/ekko-plugin-scaffold/agents/*.md`.
-- Hooks are configured through `plugins/ekko-plugin-scaffold/hooks/hooks.json`.
-- MCP servers are configured through `plugins/ekko-plugin-scaffold/.mcp.json`.
-
-After installation, those same paths are plugin-relative: `skills/<skill-name>/SKILL.md`, `agents/*.md`, `hooks/hooks.json`, and `.mcp.json`.
-
-The legacy `commands/` layout is intentionally not included in the scaffold. New user-invoked capabilities should be implemented as skills unless there is a compatibility reason to use legacy commands.
-
-## Local testing
-
-Before publishing, test the marketplace from this local checkout:
-
-```text
-/plugin marketplace add D:\\project\\coding\\project\\github\\claude-plugins
-/plugin install ekko-plugin-scaffold@zaunekko
-```
-
-After installing, verify that Claude Code lists the marketplace as `zaunekko` and can install `ekko-plugin-scaffold@zaunekko`. This initial scaffold has no active skills yet, so the expected validation target is marketplace/plugin discovery rather than skill behavior.
-
-After pushing to GitHub, test the public source:
-
-```text
-/plugin marketplace add ZaunEkko/claude-plugins
-/plugin install ekko-plugin-scaffold@zaunekko
-```
+Claude Code auto-discovers plugin components inside each installed plugin directory. New user-invoked capabilities should normally use `skills/<skill-name>/SKILL.md`; legacy `commands/` is reserved for compatibility with an existing upstream command interface.
 
 ## Development
 
-### Add a real plugin
+When adding or changing a plugin:
 
-When a concrete capability is ready, create a purpose-specific plugin directory:
+1. Work from `develop` on a `feature/<purpose>` branch.
+2. Keep all components inside the target `plugins/<plugin-name>/` directory.
+3. Add or update the marketplace entry.
+4. Update user-facing documentation and `CHANGELOG.md`.
+5. Run manifest, plugin, and behavior validation.
+6. Test local installation in explicit local scope where practical.
 
-```text
-plugins/ekko-agy-cli/
-└── .claude-plugin/plugin.json
+Core validation:
+
+```bash
+python -m json.tool .claude-plugin/marketplace.json >/dev/null
+python -m json.tool plugins/commit-commands/.claude-plugin/plugin.json >/dev/null
+python -m json.tool plugins/commit-commands/hooks/hooks.json >/dev/null
+node --test plugins/commit-commands/tests/*.mjs
+claude plugin validate .
+claude plugin validate --strict plugins/commit-commands
 ```
-
-Then add it to `.claude-plugin/marketplace.json`.
-
-### Add a skill
-
-Create a directory under the plugin's `skills/` directory:
-
-```text
-plugins/ekko-agy-cli/skills/my-skill/
-└── SKILL.md
-```
-
-A skill should include frontmatter with a strong description so Claude Code can activate it at the right time.
-
-### Add an agent
-
-Create an agent definition under the plugin's `agents/` directory:
-
-```text
-plugins/ekko-agy-cli/agents/my-agent.md
-```
-
-Use focused trigger examples and only grant the tools the agent actually needs.
-
-### Add hooks
-
-Create `hooks/hooks.json` inside the target plugin directory and any required helper scripts. Keep hook commands portable and avoid hardcoded user-specific paths.
-
-### Add MCP integration
-
-Create `.mcp.json` inside the target plugin directory and document all required environment variables in this README.
-
-## Publishing notes
-
-Before publishing a new version:
-
-1. Update the target plugin's `.claude-plugin/plugin.json` with the new semantic version.
-2. Update `.claude-plugin/marketplace.json` if plugin metadata or source changes.
-3. Update `CHANGELOG.md`.
-4. Validate the marketplace and plugin structure.
-5. Test installation in Claude Code.
-6. Tag or release from the GitHub repository.
 
 ## License
 
-MIT © ZaunEkko
+This repository uses mixed licensing:
 
-This repository is planned to use the MIT license. While the repository remains private, distribution is limited to users who have access to the private source.
+- The entire [`plugins/commit-commands/`](plugins/commit-commands/) directory is licensed under its included Apache License 2.0 because it contains an upstream-derived compatibility distribution and local additions maintained as one derivative work.
+- The repository's remaining original content is licensed under the root [MIT License](LICENSE).
+
+Private repository access still limits who can obtain the source while development remains private-first.

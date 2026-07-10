@@ -1,0 +1,18 @@
+{
+  "name": "commit-commands",
+  "version": "1.0.0",
+  "description": "Third-party compatibility distribution modified from Anthropic's official commit-commands plugin to add dynamic current-model attribution to Git commits.",
+  "author": {
+    "name": "ZaunEkko",
+    "url": "https://github.com/ZaunEkko"
+  },
+  "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/commit-commands",
+  "repository": "https://github.com/ZaunEkko/claude-plugins",
+  "license": "Apache-2.0",
+  "keywords": [
+    "git",
+    "commit",
+    "pull-request",
+    "attribution"
+  ]
+}

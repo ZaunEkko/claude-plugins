@@ -4,36 +4,52 @@ This repository follows Claude Code's marketplace layout.
 
 ## Marketplace root
 
-- `.claude-plugin/marketplace.json`: marketplace catalog read by Claude Code when users add `ZaunEkko/claude-plugins` as a marketplace.
-- `plugins/ekko-plugin-scaffold/`: temporary installable plugin scaffold referenced by the marketplace catalog.
+- `.claude-plugin/marketplace.json`: marketplace catalog read when users add `ZaunEkko/claude-plugins`.
+- `plugins/ekko-plugin-scaffold/`: temporary installable scaffold.
+- `plugins/commit-commands/`: upstream-derived compatibility distribution with dynamic commit model attribution.
 
 ## Plugin naming convention
 
-Installable plugins in this marketplace should use:
-
-```text
-ekko-<specific-purpose>
-```
-
-Use purpose-first names that remain clear in `/plugins` even without seeing the marketplace source:
+Original plugins should use `ekko-<specific-purpose>` names that remain clear without the marketplace source:
 
 - Good: `ekko-agy-cli`, `ekko-notion-tasks`, `ekko-browser-debug`
 - Avoid: `claude-plugins`, `ekko-plugins`, `ekko-skills`, `tools`, `utils`
 
-## Installable plugin
+A same-name compatibility distribution may be an exception when preserving an upstream installation identity and runtime namespace is the explicit product requirement. Such an exception must document its upstream source, license, unchanged files, modified files, local additions, and synchronization process.
 
-- `plugins/ekko-plugin-scaffold/.claude-plugin/plugin.json`: plugin manifest read by Claude Code after installation.
+`plugins/commit-commands/` is the current exception.
 
-## Optional plugin component directories
+## Installable plugin manifests
 
-All component directories currently live inside `plugins/ekko-plugin-scaffold/`:
+- `plugins/ekko-plugin-scaffold/.claude-plugin/plugin.json`: temporary scaffold manifest.
+- `plugins/commit-commands/.claude-plugin/plugin.json`: third-party compatibility distribution manifest.
 
-- `skills/`: future skills. Each skill should live at `skills/<skill-name>/SKILL.md`.
-- `agents/`: future subagent definitions as Markdown files.
-- `hooks/`: future hook configuration. Add `hooks/hooks.json` only when hooks exist.
-- `scripts/`: helper scripts used by plugin components.
+## Component directories
 
-## Intentionally absent for now
+Claude Code components live at the root of each installable plugin:
 
-- `commands/`: legacy slash-command layout. Prefer skills for new user-invoked capabilities.
-- `.mcp.json`: add inside the plugin directory only when the plugin ships an MCP server integration.
+- `skills/<skill-name>/SKILL.md`: preferred format for new user-invoked and auto-activated capabilities.
+- `agents/*.md`: subagent definitions.
+- `commands/*.md`: legacy command definitions, used only when compatibility requires the existing command namespace.
+- `hooks/hooks.json`: event hook configuration.
+- `scripts/`: helper runtimes used by commands or hooks.
+- `.mcp.json`: MCP server definitions when needed.
+
+The `commit-commands` compatibility plugin uses:
+
+```text
+plugins/commit-commands/
+├── .claude-plugin/plugin.json
+├── commands/
+│   ├── clean_gone.md
+│   ├── commit.md
+│   └── commit-push-pr.md
+├── hooks/hooks.json
+├── scripts/
+├── tests/
+├── LICENSE
+├── README.md
+└── UPSTREAM.md
+```
+
+Its entire directory is Apache-2.0 licensed. Repository content outside that directory remains under the root MIT license.
