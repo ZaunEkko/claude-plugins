@@ -50,7 +50,7 @@ test("uses the final marker and does not rewrite body Model lines", () => {
   );
 });
 
-test("inserts or replaces Effort only inside the final attribution block", () => {
+test("combines effort into Model and removes legacy Effort lines", () => {
   const withoutEffort = [
     "Effort: body value",
     "",
@@ -60,21 +60,25 @@ test("inserts or replaces Effort only inside the final attribution block", () =>
     "Co-Authored-By: Claude <noreply@anthropic.com>",
     "",
   ].join("\n");
-  const inserted = render(withoutEffort, "gpt-5.6-sol", "xhigh").buffer.toString("utf8");
+  const combined = render(withoutEffort, "gpt-5.6-sol", "xhigh").buffer.toString("utf8");
   assert.equal(
-    inserted,
-    withoutEffort.replace("Model: stale", "Model: gpt-5.6-sol\nEffort: xhigh"),
+    combined,
+    withoutEffort.replace("Model: stale", "Model: gpt-5.6-sol xhigh"),
   );
-  assert.match(inserted, /^Effort: body value$/mu);
+  assert.match(combined, /^Effort: body value$/mu);
 
   const existing = `${marker}\r\nModel: stale\r\nEffort: low\r\n`;
   assert.equal(
     render(existing, "Claude Sonnet 5", "high").buffer.toString("utf8"),
-    `${marker}\r\nModel: Claude Sonnet 5\r\nEffort: high\r\n`,
+    `${marker}\r\nModel: Claude Sonnet 5 high\r\n`,
   );
   assert.equal(
     render(existing, "Claude Sonnet 5", null).buffer.toString("utf8"),
-    `${marker}\r\nModel: Claude Sonnet 5\r\nEffort: low\r\n`,
+    `${marker}\r\nModel: Claude Sonnet 5\r\n`,
+  );
+  assert.equal(
+    render(existing, null, null).buffer.toString("utf8"),
+    `${marker}\r\n`,
   );
 
   assert.throws(
@@ -98,7 +102,7 @@ test("leaves messages byte-for-byte unchanged without a target attribution Model
 
 test("preserves LF and CRLF plus all non-target bytes", () => {
   const lf = `Subject\n\n${marker}\nModel:\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
-  assert.equal(render(lf, "unknown").buffer.toString(), lf.replace("Model:", "Model: unknown"));
+  assert.equal(render(lf, null).buffer.toString(), lf.replace("Model:\n", ""));
 
   const crlf = Buffer.from(
     `Subject\r\n\r\n${marker}\r\nModel: Claude Opus 4.8\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n`,
@@ -148,10 +152,10 @@ test("writes changed files atomically and avoids writes when no target exists", 
   const before = fs.statSync(messageFile).mtimeMs;
   const unchanged = renderCommitFile(messageFile, {
     resolution: {
-      id: "unknown",
-      display: "unknown",
-      source: "test",
-      confidence: "low",
+      id: null,
+      display: null,
+      source: "unavailable",
+      confidence: "none",
       diagnostics: {},
     },
     effortResolution: {

@@ -13,11 +13,11 @@ A private-first Claude Code plugin marketplace by [ZaunEkko](https://github.com/
 | Plugin | Install identity | Status | License |
 |---|---|---|---|
 | `ekko-plugin-scaffold` | `ekko-plugin-scaffold@zaunekko` | Temporary empty scaffold | MIT |
-| `commit-commands` | `commit-commands@zaunekko` | Third-party compatibility distribution with dynamic model and effort attribution | Apache-2.0 |
+| `commit-commands` | `commit-commands@zaunekko` | Third-party compatibility distribution with compact dynamic model attribution | Apache-2.0 |
 
 ### `commit-commands`
 
-`commit-commands@zaunekko` is derived from Anthropic's official `commit-commands` plugin. It preserves `/commit-commands:commit`, `/commit-commands:commit-push-pr`, and `/commit-commands:clean_gone`, while routing commits through a deterministic wrapper that replaces the attribution `Model:` line with the current session model and records the active `Effort:` level when available.
+`commit-commands@zaunekko` is derived from Anthropic's official `commit-commands` plugin. It preserves `/commit-commands:commit`, `/commit-commands:commit-push-pr`, and `/commit-commands:clean_gone`, while routing commits through a deterministic wrapper that writes the current model and optional effort as a compact `Model: <model> [effort]` attribution.
 
 The official and ZaunEkko distributions have the same plugin and command names. Enable exactly one:
 

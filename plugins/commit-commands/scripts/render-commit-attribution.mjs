@@ -42,8 +42,8 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
   if (buffer.includes(0x00)) {
     throw new Error("commit message contains a NUL byte");
   }
-  const safeModel = validateModelId(modelDisplay);
-  if (!safeModel) {
+  const safeModel = modelDisplay === null ? null : validateModelId(modelDisplay);
+  if (modelDisplay !== null && !safeModel) {
     throw new Error("resolved model is not safe for a single-line attribution");
   }
   const safeEffort = effortDisplay === null ? null : validateEffort(effortDisplay);
@@ -84,28 +84,27 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
 
   const edits = [];
   const modelLineEnding = buffer.subarray(modelTarget.contentEnd, modelTarget.end);
-  edits.push({
-    start: modelTarget.start,
-    end: modelTarget.end,
-    replacement: Buffer.concat([Buffer.from(`Model: ${safeModel}`, "utf8"), modelLineEnding]),
-  });
+  if (safeModel) {
+    const modelAttribution = safeEffort ? `${safeModel} ${safeEffort}` : safeModel;
+    edits.push({
+      start: modelTarget.start,
+      end: modelTarget.end,
+      replacement: Buffer.concat([Buffer.from(`Model: ${modelAttribution}`, "utf8"), modelLineEnding]),
+    });
+  } else {
+    edits.push({
+      start: modelTarget.start,
+      end: modelTarget.end,
+      replacement: Buffer.alloc(0),
+    });
+  }
 
-  if (safeEffort) {
-    if (effortTarget) {
-      const effortLineEnding = buffer.subarray(effortTarget.contentEnd, effortTarget.end);
-      edits.push({
-        start: effortTarget.start,
-        end: effortTarget.end,
-        replacement: Buffer.concat([Buffer.from(`Effort: ${safeEffort}`, "utf8"), effortLineEnding]),
-      });
-    } else {
-      const separator = modelLineEnding.length > 0 ? modelLineEnding : Buffer.from("\n", "utf8");
-      edits.push({
-        start: modelTarget.end,
-        end: modelTarget.end,
-        replacement: Buffer.concat([Buffer.from(`Effort: ${safeEffort}`, "utf8"), separator]),
-      });
-    }
+  if (effortTarget) {
+    edits.push({
+      start: effortTarget.start,
+      end: effortTarget.end,
+      replacement: Buffer.alloc(0),
+    });
   }
 
   let rendered = buffer;
@@ -173,10 +172,7 @@ function main() {
   if (!messageFile) {
     throw new Error("usage: render-commit-attribution.mjs <message-file>");
   }
-  const result = renderCommitFile(messageFile);
-  if (result.changed && result.resolution.id === "unknown") {
-    console.error("commit-commands: warning: current model could not be resolved; using Model: unknown");
-  }
+  renderCommitFile(messageFile);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

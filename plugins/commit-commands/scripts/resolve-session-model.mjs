@@ -299,10 +299,10 @@ export function resolveSessionModel({
     };
   }
   return {
-    id: "unknown",
-    display: "unknown",
-    source: "fallback",
-    confidence: "low",
+    id: null,
+    display: null,
+    source: "unavailable",
+    confidence: "none",
     diagnostics,
   };
 }

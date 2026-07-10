@@ -1,8 +1,8 @@
-# Commit Commands with Dynamic Model and Effort Attribution
+# Commit Commands with Dynamic Model Attribution
 
 `commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official [`commit-commands`](https://github.com/anthropics/claude-plugins-public/tree/main/plugins/commit-commands) plugin.
 
-It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its product-level enhancements are deterministic replacement of the commit-attribution `Model:` line with the model recorded for the current Claude Code session and insertion or replacement of `Effort:` when the active or configured effort level is available.
+It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its enhancement is deterministic replacement of the commit-attribution `Model:` line with the current Claude Code model plus the active or configured effort as an optional suffix.
 
 This distribution is maintained by ZaunEkko, not Anthropic.
 
@@ -44,9 +44,9 @@ Claude Code still generates the complete commit message, including its configure
 
 1. writes the complete message from stdin to a private temporary file;
 2. resolves the current model from the latest valid assistant record in the current transcript;
-3. falls back to the optional SessionStart model, then the user's configured default model, then `unknown`;
+3. falls back to the optional SessionStart model, then the user's configured default model;
 4. resolves effort from `CLAUDE_EFFORT`, then the user's configured `effort`/`effortLevel`;
-5. replaces the final `Model:` line and inserts or replaces `Effort:` after the final exact Claude Code attribution marker;
+5. writes `Model: <model> [effort]`, removes legacy standalone `Effort:` attribution, or removes `Model:` when no reliable model exists;
 6. runs `git commit -F <temporary-file>` only when rendering succeeds;
 7. removes the temporary file after success, failure, or interruption.
 
@@ -55,8 +55,7 @@ Example:
 ```diff
  Generated with [Claude Code](https://claude.ai/code)
 -Model: Claude Opus 4.8
-+Model: gpt-5.6-sol
-+Effort: xhigh
++Model: gpt-5.6-sol xhigh
  
  Co-Authored-By: Claude <noreply@anthropic.com>
 ```
@@ -66,11 +65,11 @@ Behavioral boundaries:
 - If the attribution has no matching `Model:` line, the message remains byte-for-byte unchanged; the plugin does not add one.
 - A `Model:` line in the commit body before the final Claude Code attribution marker is not modified.
 - If transcript and SessionStart do not provide a valid model, the plugin uses the user's configured default `model` with low confidence.
-- If none of those sources provides a valid model, the plugin writes `Model: unknown` and prints a warning.
+- If none of those sources provides a valid model, the attribution `Model:` line is removed rather than writing `unknown` or retaining a stale value.
 - Standard Claude IDs are formatted generically, such as `claude-opus-4-8` → `Claude Opus 4.8`.
 - Unknown provider IDs are kept as supplied after single-line safety validation.
-- `Effort:` accepts the known Claude Code levels `low`, `medium`, `high`, `xhigh`, and `max`.
-- If neither current-session nor configured effort is available, the plugin does not add or modify an `Effort:` line.
+- Known effort levels are `low`, `medium`, `high`, `xhigh`, and `max`; an available value is appended to the model on the same line.
+- If effort is unavailable, the line contains only the model. Legacy standalone `Effort:` attribution lines are removed.
 - LF and CRLF commit messages are both supported.
 - Model and effort data are never evaluated as shell code.
 
@@ -86,7 +85,7 @@ It does not copy prompts or transcript content. A SessionEnd hook removes the cu
 
 The resolver reads transcript JSONL from the end and only extracts the latest valid `message.model` from a top-level assistant record. The user's configured settings `model` is used only after transcript and SessionStart resolution fail. `ANTHROPIC_MODEL` remains diagnostic-only and never determines the commit attribution.
 
-Effort is not present as a dedicated field in the observed transcript schema. The plugin therefore uses the active `CLAUDE_EFFORT` value first, then the configured `effort` or `effortLevel`, and omits effort attribution when neither is available.
+Effort is not present as a dedicated field in the observed transcript schema. The plugin therefore uses the active `CLAUDE_EFFORT` value first, then the configured `effort` or `effortLevel`, and appends it to the `Model:` value when available.
 
 ## Installation
 
@@ -133,7 +132,7 @@ Run the isolated automated suite:
 node --test plugins/commit-commands/tests/*.mjs
 ```
 
-The tests cover session isolation, transcript fallback, malformed JSONL tails, model formatting and injection rejection, LF/CRLF byte preservation, renderer failure, temporary-file cleanup, successful commits, and existing pre-commit hook rejection. Git behavior tests use temporary local repositories and do not contact a real remote or GitHub.
+The tests cover session isolation, transcript and settings fallback, unavailable-model omission, compact effort formatting, malformed JSONL tails, LF/CRLF byte preservation, renderer failure, temporary-file cleanup, existing pre-commit hook rejection, and the complete `commit-push-pr` order. Push/PR tests use a local bare remote and stub `gh`; they never contact a real remote or GitHub.
 
 Validate the plugin and marketplace:
 

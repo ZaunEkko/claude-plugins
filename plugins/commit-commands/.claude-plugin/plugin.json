@@ -1,7 +1,7 @@
 {
   "name": "commit-commands",
-  "version": "1.1.1",
-  "description": "Third-party compatibility distribution modified from Anthropic's official commit-commands plugin to add dynamic current-model and effort attribution to Git commits.",
+  "version": "1.2.0",
+  "description": "Third-party compatibility distribution modified from Anthropic's official commit-commands plugin to add compact dynamic current-model attribution with optional effort metadata.",
   "author": {
     "name": "ZaunEkko",
     "url": "https://github.com/ZaunEkko"

@@ -6,7 +6,7 @@ This repository follows Claude Code's marketplace layout.
 
 - `.claude-plugin/marketplace.json`: marketplace catalog read when users add `ZaunEkko/claude-plugins`.
 - `plugins/ekko-plugin-scaffold/`: temporary installable scaffold.
-- `plugins/commit-commands/`: upstream-derived compatibility distribution with dynamic commit model and effort attribution.
+- `plugins/commit-commands/`: upstream-derived compatibility distribution with compact dynamic model attribution and optional effort metadata.
 
 ## Plugin naming convention
 

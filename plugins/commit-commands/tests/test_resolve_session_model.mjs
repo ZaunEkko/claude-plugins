@@ -86,7 +86,7 @@ test("derives the state file from CLAUDE_CODE_SESSION_ID when the exported point
   assert.equal(result.confidence, "high");
 });
 
-test("falls back to SessionStart, then user settings, then unknown", (t) => {
+test("falls back to SessionStart, then user settings, then becomes unavailable", (t) => {
   const directories = fixture(t);
   const missingTranscript = path.join(directories.tmpDirectory, "missing.jsonl");
   const fallbackState = writeState(directories, "fallback", {
@@ -121,9 +121,10 @@ test("falls back to SessionStart, then user settings, then unknown", (t) => {
     environment: { ANTHROPIC_MODEL: "claude-opus-4-8" },
     settingsPath: path.join(directories.tmpDirectory, "missing-settings.json"),
   });
-  assert.equal(unknown.id, "unknown");
-  assert.equal(unknown.display, "unknown");
-  assert.equal(unknown.source, "fallback");
+  assert.equal(unknown.id, null);
+  assert.equal(unknown.display, null);
+  assert.equal(unknown.source, "unavailable");
+  assert.equal(unknown.confidence, "none");
   assert.deepEqual(unknown.diagnostics, {
     anthropicModel: { id: "claude-opus-4-8", confidence: "low" },
   });
@@ -181,8 +182,8 @@ test("ignores corrupt state files and unsafe transcript model values", (t) => {
   );
   const state = writeState(directories, "unsafe", { transcriptPath, model: null });
   const settingsPath = path.join(directories.tmpDirectory, "missing-settings.json");
-  assert.equal(resolveSessionModel({ ...state, environment: {}, settingsPath }).id, "unknown");
+  assert.equal(resolveSessionModel({ ...state, environment: {}, settingsPath }).id, null);
 
   fs.writeFileSync(state.stateFile, "not json", "utf8");
-  assert.equal(resolveSessionModel({ ...state, environment: {}, settingsPath }).id, "unknown");
+  assert.equal(resolveSessionModel({ ...state, environment: {}, settingsPath }).id, null);
 });

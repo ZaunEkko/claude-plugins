@@ -83,7 +83,8 @@ function commitMessage(model = "Claude Opus 4.8") {
 }
 
 function renderedCommitMessage(model, effort) {
-  return `test: dynamic attribution\n\n${marker}\nModel: ${model}\nEffort: ${effort}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
+  const modelAttribution = effort ? `${model} ${effort}` : model;
+  return `test: dynamic attribution\n\n${marker}\nModel: ${modelAttribution}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
 }
 
 test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identifies the state", (t) => {
@@ -99,13 +100,48 @@ test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identif
     input: commitMessage(),
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Model: gpt-5\.6-sol/u);
-  assert.match(result.stdout, /Effort: xhigh/u);
+  assert.match(result.stdout, /Model: gpt-5\.6-sol xhigh/u);
+  assert.doesNotMatch(result.stdout, /^Effort:/mu);
   assert.equal(
     git(repository, "log", "-1", "--format=%B").trimEnd(),
     renderedCommitMessage("gpt-5.6-sol", "xhigh").trimEnd(),
   );
   assert.deepEqual(fs.readdirSync(temporaryDirectory), []);
+});
+
+test("omits model attribution when no reliable model source exists", (t) => {
+  const repository = createRepository(t);
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-unavailable-"));
+  t.after(() => fs.rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const configDirectory = path.join(temporaryDirectory, "config");
+  const messageDirectory = path.join(temporaryDirectory, "messages");
+  fs.mkdirSync(configDirectory);
+  fs.mkdirSync(messageDirectory);
+  fs.writeFileSync(path.join(configDirectory, "settings.json"), "{}\n");
+  fs.appendFileSync(path.join(repository, "file.txt"), "unavailable model\n");
+  git(repository, "add", "file.txt");
+
+  const environment = {
+    ...process.env,
+    CLAUDE_PLUGIN_ROOT: pluginRoot,
+    CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
+    CLAUDE_CODE_SESSION_ID: randomUUID(),
+    CLAUDE_CONFIG_DIR: configDirectory,
+    CLAUDE_EFFORT: "xhigh",
+    TMPDIR: toBashPath(messageDirectory),
+  };
+  delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
+
+  const result = run("bash", [wrapper], {
+    cwd: repository,
+    env: environment,
+    input: commitMessage(),
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const message = git(repository, "log", "-1", "--format=%B");
+  assert.doesNotMatch(message, /^Model:/mu);
+  assert.doesNotMatch(message, /^Effort:/mu);
+  assert.deepEqual(fs.readdirSync(messageDirectory), []);
 });
 
 test("renderer failure prevents commit and still cleans the temporary message", (t) => {
