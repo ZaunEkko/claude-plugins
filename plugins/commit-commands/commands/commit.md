@@ -3,7 +3,7 @@ allowed-tools: ["Bash(git add:*)", "Bash(git status:*)", "Bash(${CLAUDE_PLUGIN_R
 description: Create a git commit
 ---
 
-<!-- Modified by ZaunEkko from Anthropic's official commit-commands/commands/commit.md. This distribution routes commit creation through a dynamic model-attribution wrapper. -->
+<!-- Modified by ZaunEkko from Anthropic's official commit-commands/commands/commit.md. This distribution routes commit creation through a dynamic model-and-effort attribution wrapper. -->
 
 ## Context
 

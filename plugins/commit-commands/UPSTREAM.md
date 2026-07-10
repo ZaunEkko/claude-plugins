@@ -38,7 +38,7 @@ These files are byte-for-byte identical to the synchronized upstream files.
 - `.claude-plugin/plugin.json`
   - identifies ZaunEkko as the third-party maintainer;
   - adds version, repository, license, and discovery metadata;
-  - prominently describes the dynamic model-attribution modification.
+  - prominently describes the dynamic model-and-effort attribution modification.
 - `commands/commit.md`
   - keeps the official command description and context collection;
   - replaces direct `git commit` authorization with the plugin wrapper;

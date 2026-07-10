@@ -6,10 +6,16 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { resolveSessionModel, validateModelId } from "./resolve-session-model.mjs";
+import {
+  resolveSessionEffort,
+  resolveSessionModel,
+  validateEffort,
+  validateModelId,
+} from "./resolve-session-model.mjs";
 
 const ATTRIBUTION_MARKER = "Generated with [Claude Code](https://claude.ai/code)";
 const MODEL_LINE = /^Model:\s*.*$/u;
+const EFFORT_LINE = /^Effort:\s*.*$/u;
 
 function splitLineRanges(buffer) {
   const ranges = [];
@@ -29,7 +35,7 @@ function splitLineRanges(buffer) {
   return ranges;
 }
 
-export function renderCommitBuffer(buffer, modelDisplay) {
+export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
   if (!Buffer.isBuffer(buffer)) {
     throw new TypeError("commit message must be a Buffer");
   }
@@ -39,6 +45,10 @@ export function renderCommitBuffer(buffer, modelDisplay) {
   const safeModel = validateModelId(modelDisplay);
   if (!safeModel) {
     throw new Error("resolved model is not safe for a single-line attribution");
+  }
+  const safeEffort = effortDisplay === null ? null : validateEffort(effortDisplay);
+  if (effortDisplay !== null && !safeEffort) {
+    throw new Error("resolved effort is not safe for a single-line attribution");
   }
 
   const ranges = splitLineRanges(buffer);
@@ -55,29 +65,58 @@ export function renderCommitBuffer(buffer, modelDisplay) {
     return { buffer, changed: false };
   }
 
-  let target = null;
+  let modelTarget = null;
+  let effortTarget = null;
   for (let index = markerIndex + 1; index < ranges.length; index += 1) {
     const range = ranges[index];
     const line = buffer.subarray(range.start, range.contentEnd).toString("utf8");
     if (MODEL_LINE.test(line)) {
-      target = range;
+      modelTarget = range;
+    }
+    if (EFFORT_LINE.test(line)) {
+      effortTarget = range;
     }
   }
 
-  if (!target) {
+  if (!modelTarget) {
     return { buffer, changed: false };
   }
 
-  const lineEnding = buffer.subarray(target.contentEnd, target.end);
-  const replacement = Buffer.concat([Buffer.from(`Model: ${safeModel}`, "utf8"), lineEnding]);
-  return {
-    buffer: Buffer.concat([
-      buffer.subarray(0, target.start),
-      replacement,
-      buffer.subarray(target.end),
-    ]),
-    changed: true,
-  };
+  const edits = [];
+  const modelLineEnding = buffer.subarray(modelTarget.contentEnd, modelTarget.end);
+  edits.push({
+    start: modelTarget.start,
+    end: modelTarget.end,
+    replacement: Buffer.concat([Buffer.from(`Model: ${safeModel}`, "utf8"), modelLineEnding]),
+  });
+
+  if (safeEffort) {
+    if (effortTarget) {
+      const effortLineEnding = buffer.subarray(effortTarget.contentEnd, effortTarget.end);
+      edits.push({
+        start: effortTarget.start,
+        end: effortTarget.end,
+        replacement: Buffer.concat([Buffer.from(`Effort: ${safeEffort}`, "utf8"), effortLineEnding]),
+      });
+    } else {
+      const separator = modelLineEnding.length > 0 ? modelLineEnding : Buffer.from("\n", "utf8");
+      edits.push({
+        start: modelTarget.end,
+        end: modelTarget.end,
+        replacement: Buffer.concat([Buffer.from(`Effort: ${safeEffort}`, "utf8"), separator]),
+      });
+    }
+  }
+
+  let rendered = buffer;
+  for (const edit of edits.sort((left, right) => right.start - left.start)) {
+    rendered = Buffer.concat([
+      rendered.subarray(0, edit.start),
+      edit.replacement,
+      rendered.subarray(edit.end),
+    ]);
+  }
+  return { buffer: rendered, changed: true };
 }
 
 function atomicReplace(filePath, buffer, mode) {
@@ -110,7 +149,11 @@ function atomicReplace(filePath, buffer, mode) {
 
 export function renderCommitFile(
   messageFile,
-  { resolution = resolveSessionModel(), writeFile = true } = {},
+  {
+    resolution = resolveSessionModel(),
+    effortResolution = resolveSessionEffort(),
+    writeFile = true,
+  } = {},
 ) {
   const metadata = fs.lstatSync(messageFile);
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
@@ -118,11 +161,11 @@ export function renderCommitFile(
   }
 
   const original = fs.readFileSync(messageFile);
-  const rendered = renderCommitBuffer(original, resolution.display);
+  const rendered = renderCommitBuffer(original, resolution.display, effortResolution.display);
   if (rendered.changed && writeFile) {
     atomicReplace(messageFile, rendered.buffer, metadata.mode);
   }
-  return { ...rendered, resolution };
+  return { ...rendered, resolution, effortResolution };
 }
 
 function main() {

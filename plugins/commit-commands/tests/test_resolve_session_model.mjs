@@ -8,7 +8,10 @@ import { stateDirectory, statePathForSession } from "../scripts/capture-session-
 import {
   findLatestAssistantModel,
   formatModelId,
+  resolveSessionEffort,
   resolveSessionModel,
+  stateFileFromSessionEnvironment,
+  validateEffort,
   validateModelId,
 } from "../scripts/resolve-session-model.mjs";
 
@@ -55,7 +58,35 @@ test("uses the latest valid assistant transcript model before the SessionStart m
   assert.equal(findLatestAssistantModel(transcriptPath, { chunkSize: 17 }), "gpt-5.6-sol");
 });
 
-test("falls back to SessionStart and then strictly to unknown", (t) => {
+test("derives the state file from CLAUDE_CODE_SESSION_ID when the exported pointer is unavailable", (t) => {
+  const directories = fixture(t);
+  const sessionId = "bc2cacab-fec0-4caa-9f40-b55d88bb815c";
+  const transcriptPath = path.join(directories.tmpDirectory, "current-session.jsonl");
+  fs.writeFileSync(
+    transcriptPath,
+    `${JSON.stringify({ type: "assistant", message: { model: "gpt-5.6-sol" } })}\n`,
+  );
+  const state = writeState(directories, sessionId, { transcriptPath, model: null });
+  const environment = {
+    CLAUDE_CODE_SESSION_ID: sessionId,
+    CLAUDE_COMMIT_COMMANDS_STATE_FILE: path.join(directories.directory, "missing-exported-state.json"),
+  };
+
+  assert.equal(
+    stateFileFromSessionEnvironment(environment, directories.directory),
+    state.stateFile,
+  );
+  const result = resolveSessionModel({
+    expectedStateDirectory: directories.directory,
+    environment,
+    settingsPath: path.join(directories.tmpDirectory, "missing-settings.json"),
+  });
+  assert.equal(result.id, "gpt-5.6-sol");
+  assert.equal(result.source, "transcript");
+  assert.equal(result.confidence, "high");
+});
+
+test("falls back to SessionStart, then user settings, then unknown", (t) => {
   const directories = fixture(t);
   const missingTranscript = path.join(directories.tmpDirectory, "missing.jsonl");
   const fallbackState = writeState(directories, "fallback", {
@@ -67,22 +98,68 @@ test("falls back to SessionStart and then strictly to unknown", (t) => {
   assert.equal(fallback.display, "Claude Haiku 4.5");
   assert.equal(fallback.source, "session-start");
 
-  const unknownState = writeState(directories, "unknown", {
+  const settingsState = writeState(directories, "settings-fallback", {
     transcriptPath: missingTranscript,
     model: null,
   });
-  const unknown = resolveSessionModel({
-    ...unknownState,
+  const settingsFallback = resolveSessionModel({
+    ...settingsState,
     environment: { ANTHROPIC_MODEL: "claude-opus-4-8" },
     settingsModel: "claude-sonnet-5",
+  });
+  assert.equal(settingsFallback.id, "claude-sonnet-5");
+  assert.equal(settingsFallback.display, "Claude Sonnet 5");
+  assert.equal(settingsFallback.source, "settings");
+  assert.equal(settingsFallback.confidence, "low");
+  assert.deepEqual(settingsFallback.diagnostics, {
+    anthropicModel: { id: "claude-opus-4-8", confidence: "low" },
+    settingsModel: { id: "claude-sonnet-5", confidence: "low" },
+  });
+
+  const unknown = resolveSessionModel({
+    ...settingsState,
+    environment: { ANTHROPIC_MODEL: "claude-opus-4-8" },
+    settingsPath: path.join(directories.tmpDirectory, "missing-settings.json"),
   });
   assert.equal(unknown.id, "unknown");
   assert.equal(unknown.display, "unknown");
   assert.equal(unknown.source, "fallback");
   assert.deepEqual(unknown.diagnostics, {
     anthropicModel: { id: "claude-opus-4-8", confidence: "low" },
-    settingsModel: { id: "claude-sonnet-5", confidence: "low" },
   });
+});
+
+test("resolves effort from the current session, then settings, and otherwise omits it", (t) => {
+  const directories = fixture(t);
+  const settingsPath = path.join(directories.tmpDirectory, "settings.json");
+  fs.writeFileSync(settingsPath, JSON.stringify({ effort: "medium" }));
+
+  assert.deepEqual(resolveSessionEffort({
+    environment: { CLAUDE_EFFORT: "xhigh" },
+    settingsPath,
+  }), {
+    id: "xhigh",
+    display: "xhigh",
+    source: "environment",
+    confidence: "high",
+  });
+  assert.deepEqual(resolveSessionEffort({ environment: {}, settingsPath }), {
+    id: "medium",
+    display: "medium",
+    source: "settings",
+    confidence: "low",
+  });
+  assert.deepEqual(resolveSessionEffort({
+    environment: {},
+    settingsPath: path.join(directories.tmpDirectory, "missing-settings.json"),
+  }), {
+    id: null,
+    display: null,
+    source: "unavailable",
+    confidence: "none",
+  });
+  assert.equal(validateEffort("XHIGH"), "xhigh");
+  assert.equal(validateEffort("xhigh\nInjected"), null);
 });
 
 test("formats standard Claude IDs without maintaining a fixed model table", () => {
@@ -103,8 +180,9 @@ test("ignores corrupt state files and unsafe transcript model values", (t) => {
     `${JSON.stringify({ type: "assistant", message: { model: "bad\nCo-Authored-By: attacker" } })}\n`,
   );
   const state = writeState(directories, "unsafe", { transcriptPath, model: null });
-  assert.equal(resolveSessionModel({ ...state, environment: {} }).id, "unknown");
+  const settingsPath = path.join(directories.tmpDirectory, "missing-settings.json");
+  assert.equal(resolveSessionModel({ ...state, environment: {}, settingsPath }).id, "unknown");
 
   fs.writeFileSync(state.stateFile, "not json", "utf8");
-  assert.equal(resolveSessionModel({ ...state, environment: {} }).id, "unknown");
+  assert.equal(resolveSessionModel({ ...state, environment: {}, settingsPath }).id, "unknown");
 });

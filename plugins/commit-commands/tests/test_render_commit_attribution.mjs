@@ -11,8 +11,8 @@ import {
 
 const marker = "Generated with [Claude Code](https://claude.ai/code)";
 
-function render(text, model) {
-  return renderCommitBuffer(Buffer.from(text, "utf8"), model);
+function render(text, model, effort = null) {
+  return renderCommitBuffer(Buffer.from(text, "utf8"), model, effort);
 }
 
 test("replaces only the last Model line after the final attribution marker", () => {
@@ -47,6 +47,39 @@ test("uses the final marker and does not rewrite body Model lines", () => {
   assert.equal(
     result.buffer.toString("utf8"),
     original.replace("Model: active attribution", "Model: Claude Opus 4.8"),
+  );
+});
+
+test("inserts or replaces Effort only inside the final attribution block", () => {
+  const withoutEffort = [
+    "Effort: body value",
+    "",
+    marker,
+    "Model: stale",
+    "",
+    "Co-Authored-By: Claude <noreply@anthropic.com>",
+    "",
+  ].join("\n");
+  const inserted = render(withoutEffort, "gpt-5.6-sol", "xhigh").buffer.toString("utf8");
+  assert.equal(
+    inserted,
+    withoutEffort.replace("Model: stale", "Model: gpt-5.6-sol\nEffort: xhigh"),
+  );
+  assert.match(inserted, /^Effort: body value$/mu);
+
+  const existing = `${marker}\r\nModel: stale\r\nEffort: low\r\n`;
+  assert.equal(
+    render(existing, "Claude Sonnet 5", "high").buffer.toString("utf8"),
+    `${marker}\r\nModel: Claude Sonnet 5\r\nEffort: high\r\n`,
+  );
+  assert.equal(
+    render(existing, "Claude Sonnet 5", null).buffer.toString("utf8"),
+    `${marker}\r\nModel: Claude Sonnet 5\r\nEffort: low\r\n`,
+  );
+
+  assert.throws(
+    () => render(`${marker}\nModel: old\n`, "safe", "xhigh\nInjected"),
+    /effort is not safe/u,
   );
 });
 
@@ -101,6 +134,12 @@ test("writes changed files atomically and avoids writes when no target exists", 
       confidence: "high",
       diagnostics: {},
     },
+    effortResolution: {
+      id: null,
+      display: null,
+      source: "unavailable",
+      confidence: "none",
+    },
   });
   assert.equal(changed.changed, true);
   assert.equal(fs.readFileSync(messageFile, "utf8"), `${marker}\nModel: gpt-5.6-sol\n`);
@@ -114,6 +153,12 @@ test("writes changed files atomically and avoids writes when no target exists", 
       source: "test",
       confidence: "low",
       diagnostics: {},
+    },
+    effortResolution: {
+      id: null,
+      display: null,
+      source: "unavailable",
+      confidence: "none",
     },
   });
   assert.equal(unchanged.changed, false);

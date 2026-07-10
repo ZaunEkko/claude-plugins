@@ -54,20 +54,26 @@ function createState(t, model = "gpt-5.6-sol") {
     captureSessionEnd({ session_id: sessionId });
     fs.rmSync(transcriptDirectory, { recursive: true, force: true });
   });
-  return stateFile;
+  return { stateFile, sessionId };
 }
 
-function wrapperEnvironment(t, stateFile) {
+function wrapperEnvironment(t, state, { includeStatePointer = false } = {}) {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-messages-"));
   t.after(() => fs.rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    CLAUDE_PLUGIN_ROOT: pluginRoot,
+    CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
+    CLAUDE_CODE_SESSION_ID: state.sessionId,
+    CLAUDE_EFFORT: "xhigh",
+    TMPDIR: toBashPath(temporaryDirectory),
+  };
+  delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
+  if (includeStatePointer) {
+    environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE = state.stateFile;
+  }
   return {
-    environment: {
-      ...process.env,
-      CLAUDE_PLUGIN_ROOT: pluginRoot,
-      CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
-      CLAUDE_COMMIT_COMMANDS_STATE_FILE: stateFile,
-      TMPDIR: toBashPath(temporaryDirectory),
-    },
+    environment,
     temporaryDirectory,
   };
 }
@@ -76,7 +82,11 @@ function commitMessage(model = "Claude Opus 4.8") {
   return `test: dynamic attribution\n\n${marker}\nModel: ${model}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
 }
 
-test("commits through the wrapper with the transcript model and cleans its message file", (t) => {
+function renderedCommitMessage(model, effort) {
+  return `test: dynamic attribution\n\n${marker}\nModel: ${model}\nEffort: ${effort}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
+}
+
+test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identifies the state", (t) => {
   const repository = createRepository(t);
   const stateFile = createState(t);
   const { environment, temporaryDirectory } = wrapperEnvironment(t, stateFile);
@@ -90,9 +100,10 @@ test("commits through the wrapper with the transcript model and cleans its messa
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Model: gpt-5\.6-sol/u);
+  assert.match(result.stdout, /Effort: xhigh/u);
   assert.equal(
     git(repository, "log", "-1", "--format=%B").trimEnd(),
-    commitMessage("gpt-5.6-sol").trimEnd(),
+    renderedCommitMessage("gpt-5.6-sol", "xhigh").trimEnd(),
   );
   assert.deepEqual(fs.readdirSync(temporaryDirectory), []);
 });

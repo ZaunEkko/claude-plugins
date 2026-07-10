@@ -3,7 +3,7 @@ allowed-tools: ["Bash(git checkout --branch:*)", "Bash(git add:*)", "Bash(git st
 description: Commit, push, and open a PR
 ---
 
-<!-- Modified by ZaunEkko from Anthropic's official commit-commands/commands/commit-push-pr.md. This distribution routes commit creation through a dynamic model-attribution wrapper and enforces dependent Git steps sequentially. -->
+<!-- Modified by ZaunEkko from Anthropic's official commit-commands/commands/commit-push-pr.md. This distribution routes commit creation through a dynamic model-and-effort attribution wrapper and enforces dependent Git steps sequentially. -->
 
 ## Context
 

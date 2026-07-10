@@ -1,8 +1,8 @@
-# Commit Commands with Dynamic Model Attribution
+# Commit Commands with Dynamic Model and Effort Attribution
 
 `commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official [`commit-commands`](https://github.com/anthropics/claude-plugins-public/tree/main/plugins/commit-commands) plugin.
 
-It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its only product-level enhancement is deterministic replacement of an existing commit-attribution `Model:` line with the model recorded for the current Claude Code session.
+It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its product-level enhancements are deterministic replacement of the commit-attribution `Model:` line with the model recorded for the current Claude Code session and insertion or replacement of `Effort:` when the active or configured effort level is available.
 
 This distribution is maintained by ZaunEkko, not Anthropic.
 
@@ -44,10 +44,11 @@ Claude Code still generates the complete commit message, including its configure
 
 1. writes the complete message from stdin to a private temporary file;
 2. resolves the current model from the latest valid assistant record in the current transcript;
-3. falls back to the optional SessionStart model, then to `unknown`;
-4. replaces the final `Model:` line after the final exact Claude Code attribution marker;
-5. runs `git commit -F <temporary-file>` only when rendering succeeds;
-6. removes the temporary file after success, failure, or interruption.
+3. falls back to the optional SessionStart model, then the user's configured default model, then `unknown`;
+4. resolves effort from `CLAUDE_EFFORT`, then the user's configured `effort`/`effortLevel`;
+5. replaces the final `Model:` line and inserts or replaces `Effort:` after the final exact Claude Code attribution marker;
+6. runs `git commit -F <temporary-file>` only when rendering succeeds;
+7. removes the temporary file after success, failure, or interruption.
 
 Example:
 
@@ -55,6 +56,7 @@ Example:
  Generated with [Claude Code](https://claude.ai/code)
 -Model: Claude Opus 4.8
 +Model: gpt-5.6-sol
++Effort: xhigh
  
  Co-Authored-By: Claude <noreply@anthropic.com>
 ```
@@ -63,15 +65,18 @@ Behavioral boundaries:
 
 - If the attribution has no matching `Model:` line, the message remains byte-for-byte unchanged; the plugin does not add one.
 - A `Model:` line in the commit body before the final Claude Code attribution marker is not modified.
-- If neither transcript nor SessionStart provides a valid model, the plugin writes `Model: unknown` and prints a warning.
+- If transcript and SessionStart do not provide a valid model, the plugin uses the user's configured default `model` with low confidence.
+- If none of those sources provides a valid model, the plugin writes `Model: unknown` and prints a warning.
 - Standard Claude IDs are formatted generically, such as `claude-opus-4-8` → `Claude Opus 4.8`.
 - Unknown provider IDs are kept as supplied after single-line safety validation.
+- `Effort:` accepts the known Claude Code levels `low`, `medium`, `high`, `xhigh`, and `max`.
+- If neither current-session nor configured effort is available, the plugin does not add or modify an `Effort:` line.
 - LF and CRLF commit messages are both supported.
-- Model data is never evaluated as shell code.
+- Model and effort data are never evaluated as shell code.
 
 ## Session state and privacy
 
-A SessionStart hook creates a per-session state file in a private directory under the operating-system temporary directory and exports its path through `CLAUDE_ENV_FILE`. The state contains only:
+A SessionStart hook creates a per-session state file in a private directory under the operating-system temporary directory. When Claude Code exposes `CLAUDE_ENV_FILE`, the hook also exports the exact state path for later Bash calls. If that export is unavailable, the resolver deterministically derives the same SHA-256 state filename from `CLAUDE_CODE_SESSION_ID`. The state contains only:
 
 - the transcript path;
 - the optional SessionStart model;
@@ -79,7 +84,9 @@ A SessionStart hook creates a per-session state file in a private directory unde
 
 It does not copy prompts or transcript content. A SessionEnd hook removes the current state, and SessionStart removes stale state files older than seven days.
 
-The resolver reads transcript JSONL from the end and only extracts the latest valid `message.model` from a top-level assistant record. `ANTHROPIC_MODEL` and the configured settings model are diagnostic-only and never determine the commit attribution.
+The resolver reads transcript JSONL from the end and only extracts the latest valid `message.model` from a top-level assistant record. The user's configured settings `model` is used only after transcript and SessionStart resolution fail. `ANTHROPIC_MODEL` remains diagnostic-only and never determines the commit attribution.
+
+Effort is not present as a dedicated field in the observed transcript schema. The plugin therefore uses the active `CLAUDE_EFFORT` value first, then the configured `effort` or `effortLevel`, and omits effort attribution when neither is available.
 
 ## Installation
 
