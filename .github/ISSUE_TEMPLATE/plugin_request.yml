@@ -1,0 +1,62 @@
+name: Plugin or capability request / 插件或能力建议
+description: Propose a focused Claude Code plugin or improvement / 建议一个聚焦的 Claude Code 插件或改进
+title: "[Request]: "
+body:
+  - type: dropdown
+    id: request_type
+    attributes:
+      label: Request type / 建议类型
+      options:
+        - New original plugin
+        - New skill or agent
+        - Existing plugin improvement
+        - Hook or automation
+        - MCP integration
+        - Upstream compatibility distribution
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem / 用户问题
+      description: Describe the workflow problem before proposing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome / 期望结果
+      description: What should the user be able to do in Claude Code?
+    validations:
+      required: true
+
+  - type: textarea
+    id: interface
+    attributes:
+      label: Proposed interface / 建议接口
+      description: Optional skill name, namespace, trigger, command, hook event, or MCP capability.
+
+  - type: textarea
+    id: trust
+    attributes:
+      label: Trust and permissions / 信任与权限
+      description: Note shell execution, hooks, network access, credentials, file changes, or external services.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / 已考虑的替代方案
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist / 检查清单
+      options:
+        - label: The request is focused enough to have a purpose-first plugin or skill name.
+        - label: I understand that new capabilities should prefer `skills/` over legacy `commands/`.
+        - label: I have not included credentials, private transcript content, or sensitive repository data.
+          required: true

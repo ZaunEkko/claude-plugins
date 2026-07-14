@@ -1,0 +1,27 @@
+{
+  "description": "Captures per-session model metadata for dynamic Git commit attribution.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/capture-session-model.mjs\" start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/capture-session-model.mjs\" end",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

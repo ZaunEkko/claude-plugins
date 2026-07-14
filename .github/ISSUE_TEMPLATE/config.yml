@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support and troubleshooting / 支持与排查
+    url: https://github.com/ZaunEkko/claude-plugins/blob/main/SUPPORT.md
+    about: Check installation, update, reload, scope, and diagnostic guidance before filing an issue.
+  - name: Private security report / 私密安全报告
+    url: https://github.com/ZaunEkko/claude-plugins/security/advisories/new
+    about: Report exploitable vulnerabilities privately. Do not disclose them in public issues.

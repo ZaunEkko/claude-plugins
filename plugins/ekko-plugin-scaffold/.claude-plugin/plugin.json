@@ -1,7 +1,7 @@
 {
   "name": "ekko-plugin-scaffold",
   "version": "0.1.0",
-  "description": "A temporary Claude Code plugin scaffold by ZaunEkko. Future published plugins should use purpose-first names like ekko-agy-cli.",
+  "description": "Historical unlisted Claude Code plugin scaffold retained as a repository layout example; not a supported marketplace release.",
   "author": {
     "name": "ZaunEkko",
     "url": "https://github.com/ZaunEkko"

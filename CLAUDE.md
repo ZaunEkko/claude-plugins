@@ -4,18 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project purpose
 
-This repository is a Claude Code plugin marketplace container for ZaunEkko plugins. The marketplace name is `zaunekko`; the GitHub source is intended to be `ZaunEkko/claude-plugins`.
+This repository is a Claude Code plugin marketplace container for ZaunEkko plugins. The marketplace name is `zaunekko`; the GitHub source is `ZaunEkko/claude-plugins`.
 
-The repository is private-first while plugins are developed and tested. The license plan is MIT.
+The repository is maintained for public distribution with release-ready changes developed and validated before integration. Repository content is MIT by default; the entire upstream-derived `plugins/commit-commands/` directory is separately licensed under its included Apache-2.0 license.
 
 ## Architecture
 
 - `.claude-plugin/marketplace.json` is the marketplace catalog. Claude Code reads it when users add this repository as a marketplace.
 - `plugins/<plugin-name>/` contains installable plugin directories referenced by the marketplace catalog.
-- The current temporary placeholder plugin is `plugins/ekko-plugin-scaffold/`.
+- `plugins/ekko-plugin-scaffold/` is an unlisted historical layout example, not an active marketplace plugin.
+- `plugins/commit-commands/` is a documented same-name compatibility distribution derived from Anthropic's official plugin; it uses Apache-2.0 and preserves the upstream command namespace.
 - Each installable plugin has its own manifest at `plugins/<plugin-name>/.claude-plugin/plugin.json`.
 - Optional plugin components live inside the target plugin directory:
   - `skills/<skill-name>/SKILL.md`
+  - `commands/*.md` only for documented legacy/upstream compatibility
   - `agents/*.md`
   - `hooks/hooks.json`
   - `.mcp.json`
@@ -33,21 +35,27 @@ Use purpose-first names that are clear in `/plugins` without needing the marketp
 
 Avoid generic installable plugin names such as `claude-plugins`, `ekko-plugins`, `ekko-skills`, `tools`, or `utils`.
 
+A same-name exception is allowed only for a licensed upstream compatibility distribution whose explicit purpose is to preserve the upstream installation and runtime namespace. Keep its provenance, file hashes, modification notices, synchronization procedure, and directory-specific license documented. `commit-commands` is the current exception.
+
 ## Common validation commands
 
-Validate the marketplace catalog and current scaffold plugin manifest:
+Validate the marketplace catalog and affected plugin manifests:
 
 ```bash
 python -m json.tool .claude-plugin/marketplace.json >/dev/null
 python -m json.tool plugins/ekko-plugin-scaffold/.claude-plugin/plugin.json >/dev/null
+python -m json.tool plugins/commit-commands/.claude-plugin/plugin.json >/dev/null
+python -m json.tool plugins/commit-commands/hooks/hooks.json >/dev/null
 ```
 
 Refresh and install from the local marketplace:
 
 ```bash
 claude plugin marketplace update zaunekko
-claude plugin install ekko-plugin-scaffold@zaunekko
+claude plugin install <plugin-name>@zaunekko
 ```
+
+When testing a same-name compatibility distribution, use explicit local scope and disable the official distribution only in that same scope. Do not modify user-scope plugin settings during automated validation.
 
 If adding a new plugin, validate its manifest with the same `python -m json.tool plugins/<plugin-name>/.claude-plugin/plugin.json >/dev/null` pattern and update `.claude-plugin/marketplace.json`.
 
@@ -80,14 +88,14 @@ python -m json.tool plugins/<plugin-name>/.claude-plugin/plugin.json >/dev/null
 
 When adding a real plugin:
 
-1. Create `plugins/ekko-<specific-purpose>/.claude-plugin/plugin.json`.
-2. Add the plugin entry to `.claude-plugin/marketplace.json` with `source: "./plugins/ekko-<specific-purpose>"`.
-3. Put skills, agents, hooks, MCP configuration, and scripts inside that plugin directory.
+1. Create `plugins/<plugin-name>/.claude-plugin/plugin.json`; original plugins normally use `ekko-<specific-purpose>`.
+2. Add the plugin entry to `.claude-plugin/marketplace.json` with `source: "./plugins/<plugin-name>"`.
+3. Put skills, agents, hooks, MCP configuration, commands used for compatibility, and scripts inside that plugin directory.
 4. Update `README.md`, `docs/plugin-layout.md`, and `CHANGELOG.md` for user-visible changes.
-5. Run the JSON validation commands above.
+5. Run the JSON validation commands above and the plugin's behavior tests.
 6. Test local installation with `claude plugin marketplace update zaunekko` and `claude plugin install <plugin-name>@zaunekko`.
 
-For new user-invoked capabilities, prefer skills in `skills/<skill-name>/SKILL.md` over the legacy `commands/` layout.
+For new user-invoked capabilities, prefer skills in `skills/<skill-name>/SKILL.md` over the legacy `commands/` layout. Preserve `commands/` only when an existing upstream interface requires compatibility.
 
 ## Local-only files
 
