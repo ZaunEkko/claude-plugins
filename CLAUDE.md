@@ -4,15 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project purpose
 
-This repository is a Claude Code plugin marketplace container for ZaunEkko plugins. The marketplace name is `zaunekko`; the GitHub source is intended to be `ZaunEkko/claude-plugins`.
+This repository is a Claude Code plugin marketplace container for ZaunEkko plugins. The marketplace name is `zaunekko`; the GitHub source is `ZaunEkko/claude-plugins`.
 
-The repository is private-first while plugins are developed and tested. Repository content is MIT by default; the entire upstream-derived `plugins/commit-commands/` directory is separately licensed under its included Apache-2.0 license.
+The repository is maintained for public distribution with release-ready changes developed and validated before integration. Repository content is MIT by default; the entire upstream-derived `plugins/commit-commands/` directory is separately licensed under its included Apache-2.0 license.
 
 ## Architecture
 
 - `.claude-plugin/marketplace.json` is the marketplace catalog. Claude Code reads it when users add this repository as a marketplace.
 - `plugins/<plugin-name>/` contains installable plugin directories referenced by the marketplace catalog.
-- The current temporary placeholder plugin is `plugins/ekko-plugin-scaffold/`.
+- `plugins/ekko-plugin-scaffold/` is an unlisted historical layout example, not an active marketplace plugin.
 - `plugins/commit-commands/` is a documented same-name compatibility distribution derived from Anthropic's official plugin; it uses Apache-2.0 and preserves the upstream command namespace.
 - Each installable plugin has its own manifest at `plugins/<plugin-name>/.claude-plugin/plugin.json`.
 - Optional plugin components live inside the target plugin directory:

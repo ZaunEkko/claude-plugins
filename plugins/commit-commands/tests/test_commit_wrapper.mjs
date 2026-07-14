@@ -6,7 +6,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { captureSessionEnd, captureSessionStart } from "../scripts/capture-session-model.mjs";
+import {
+  STATE_DIRECTORY_NAME,
+  captureSessionEnd,
+  captureSessionStart,
+} from "../scripts/capture-session-model.mjs";
 
 const pluginRoot = path.resolve(import.meta.dirname, "..");
 const wrapper = path.join(pluginRoot, "scripts", "commit-with-dynamic-attribution.sh");
@@ -41,7 +45,7 @@ function toBashPath(value) {
   return value.replaceAll("\\", "/");
 }
 
-function createState(t, model = "gpt-5.6-sol") {
+function createState(t, model = "gpt-5.6-sol", { tmpDirectory = os.tmpdir() } = {}) {
   const sessionId = randomUUID();
   const transcriptDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-transcript-"));
   const transcriptPath = path.join(transcriptDirectory, "session.jsonl");
@@ -49,9 +53,12 @@ function createState(t, model = "gpt-5.6-sol") {
     transcriptPath,
     `${JSON.stringify({ type: "assistant", message: { model, content: [{ type: "tool_use" }] } })}\n`,
   );
-  const stateFile = captureSessionStart({ session_id: sessionId, transcript_path: transcriptPath });
+  const stateFile = captureSessionStart(
+    { session_id: sessionId, transcript_path: transcriptPath },
+    { tmpDirectory },
+  );
   t.after(() => {
-    captureSessionEnd({ session_id: sessionId });
+    captureSessionEnd({ session_id: sessionId }, { tmpDirectory });
     fs.rmSync(transcriptDirectory, { recursive: true, force: true });
   });
   return { stateFile, sessionId };
@@ -84,13 +91,25 @@ function commitMessage(model = "Claude Opus 4.8") {
 
 function renderedCommitMessage(model, effort) {
   const modelAttribution = effort ? `${model} ${effort}` : model;
-  return `test: dynamic attribution\n\n${marker}\nModel: ${modelAttribution}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
+  return `test: dynamic attribution\n\n${marker}\n\nModel: ${modelAttribution}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
 }
 
 test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identifies the state", (t) => {
   const repository = createRepository(t);
-  const stateFile = createState(t);
-  const { environment, temporaryDirectory } = wrapperEnvironment(t, stateFile);
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-session-root-"));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const state = createState(t, "gpt-5.6-sol", { tmpDirectory: temporaryRoot });
+  const environment = {
+    ...process.env,
+    CLAUDE_PLUGIN_ROOT: pluginRoot,
+    CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
+    CLAUDE_CODE_SESSION_ID: state.sessionId,
+    CLAUDE_EFFORT: "xhigh",
+    TEMP: toBashPath(temporaryRoot),
+    TMP: toBashPath(temporaryRoot),
+    TMPDIR: toBashPath(temporaryRoot),
+  };
+  delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
   fs.appendFileSync(path.join(repository, "file.txt"), "changed\n");
   git(repository, "add", "file.txt");
 
@@ -106,7 +125,7 @@ test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identif
     git(repository, "log", "-1", "--format=%B").trimEnd(),
     renderedCommitMessage("gpt-5.6-sol", "xhigh").trimEnd(),
   );
-  assert.deepEqual(fs.readdirSync(temporaryDirectory), []);
+  assert.deepEqual(fs.readdirSync(temporaryRoot), [STATE_DIRECTORY_NAME]);
 });
 
 test("omits model attribution when no reliable model source exists", (t) => {

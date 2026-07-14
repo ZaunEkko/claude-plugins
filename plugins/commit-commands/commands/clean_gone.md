@@ -1,53 +1,38 @@
 ---
-description: Cleans up all git branches marked as [gone] (branches that have been deleted on the remote but still exist locally), including removing associated worktrees.
+allowed-tools: ["Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/clean-gone.mjs:*)", "AskUserQuestion"]
+description: Safely clean local branches whose remote-tracking upstream is gone
 ---
 
-## Your Task
+<!-- Modified by ZaunEkko from Anthropic's official commit-commands/commands/clean_gone.md. This distribution replaces human-readable Git parsing and forced deletion with a deterministic plan, explicit confirmation, and state-validated apply step. -->
 
-You need to execute the following bash commands to clean up stale local branches that have been deleted from the remote repository.
+## Your task
 
-## Commands to Execute
+Safely clean local branches whose configured `refs/remotes/...` upstream no longer exists.
 
-1. **First, list branches to identify any with [gone] status**
-   Execute this command:
+1. Run the deterministic planner exactly once:
+
    ```bash
-   git branch -v
-   ```
-   
-   Note: Branches with a '+' prefix have associated worktrees and must have their worktrees removed before deletion.
-
-2. **Next, identify worktrees that need to be removed for [gone] branches**
-   Execute this command:
-   ```bash
-   git worktree list
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/clean-gone.mjs" plan
    ```
 
-3. **Finally, remove worktrees and delete [gone] branches (handles both regular and worktree branches)**
-   Execute this command:
+2. Present the complete planner output to the user, including every `DELETE`/`SKIP` entry and the final `Plan digest: sha256:...` line.
+
+3. If the plan contains no `DELETE` entry, report that no safe cleanup is available and stop. Do not ask for confirmation and do not run `apply`.
+
+4. If the plan contains one or more `DELETE` entries, use `AskUserQuestion` to request explicit confirmation for that exact plan digest. The affirmative option must clearly say that the listed clean worktrees and branches will be removed. Any cancellation, free-form ambiguity, or non-affirmative answer means cancel; do not run `apply`.
+
+5. Only after the user explicitly confirms the exact plan, run:
+
    ```bash
-   # Process all [gone] branches, removing '+' prefix if present
-   git branch -v | grep '\[gone\]' | sed 's/^[+* ]//' | awk '{print $1}' | while read branch; do
-     echo "Processing branch: $branch"
-     # Find and remove worktree if it exists
-     worktree=$(git worktree list | grep "\\[$branch\\]" | awk '{print $1}')
-     if [ ! -z "$worktree" ] && [ "$worktree" != "$(git rev-parse --show-toplevel)" ]; then
-       echo "  Removing worktree: $worktree"
-       git worktree remove --force "$worktree"
-     fi
-     # Delete the branch
-     echo "  Deleting branch: $branch"
-     git branch -D "$branch"
-   done
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/clean-gone.mjs" apply --expected '<exact sha256 digest from the displayed plan>'
    ```
 
-## Expected Behavior
+6. Report the script result exactly. If apply fails, stop without issuing follow-up Git deletion commands. The script may already have completed an earlier listed operation; preserve and report its partial-failure details.
 
-After executing these commands, you will:
+## Safety boundaries
 
-- See a list of all local branches with their status
-- Identify and remove any worktrees associated with [gone] branches
-- Delete all branches marked as [gone]
-- Provide feedback on which worktrees and branches were removed
-
-If no branches are marked as [gone], report that no cleanup was needed.
-
+- Do not run `git fetch`, `git remote prune`, or any network command. The plan uses the repository's current remote-tracking refs.
+- Do not substitute inline `git branch`, `git worktree`, `grep`, `sed`, or `awk` cleanup commands.
+- Do not force-remove dirty or locked worktrees.
+- Do not override `SKIP` results. Main/current worktrees, dirty or untracked worktrees, locked/prunable worktrees, and branches with unpreserved commits require manual review outside this command.
+- A digest mismatch means repository state changed. Rerun `plan` and request confirmation again; never reuse the previous confirmation.

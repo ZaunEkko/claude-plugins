@@ -6,7 +6,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { captureSessionEnd, captureSessionStart } from "../scripts/capture-session-model.mjs";
+import {
+  STATE_DIRECTORY_NAME,
+  captureSessionEnd,
+  captureSessionStart,
+} from "../scripts/capture-session-model.mjs";
 
 const pluginRoot = path.resolve(import.meta.dirname, "..");
 const wrapper = path.join(pluginRoot, "scripts", "commit-with-dynamic-attribution.sh");
@@ -61,8 +65,11 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
     transcriptPath,
     `${JSON.stringify({ type: "assistant", message: { model: "gpt-5.6-sol" } })}\n`,
   );
-  captureSessionStart({ session_id: sessionId, transcript_path: transcriptPath });
-  t.after(() => captureSessionEnd({ session_id: sessionId }));
+  const stateFile = captureSessionStart(
+    { session_id: sessionId, transcript_path: transcriptPath },
+    { tmpDirectory: messages },
+  );
+  t.after(() => captureSessionEnd({ session_id: sessionId }, { tmpDirectory: messages }));
 
   fs.appendFileSync(path.join(repository, "file.txt"), "changed\n");
   git(repository, "add", "file.txt");
@@ -71,10 +78,12 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
     CLAUDE_PLUGIN_ROOT: pluginRoot,
     CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
     CLAUDE_CODE_SESSION_ID: sessionId,
+    CLAUDE_COMMIT_COMMANDS_STATE_FILE: stateFile,
     CLAUDE_EFFORT: "high",
+    TEMP: toBashPath(messages),
+    TMP: toBashPath(messages),
     TMPDIR: toBashPath(messages),
   };
-  delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
 
   const commit = run("bash", [wrapper], {
     cwd: repository,
@@ -84,6 +93,11 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
   assert.equal(commit.status, 0, commit.stderr || commit.stdout);
   assert.match(commit.stdout, /Model: gpt-5\.6-sol high/u);
   assert.doesNotMatch(commit.stdout, /^Effort:/mu);
+  assert.ok(
+    git(repository, "log", "-1", "--format=%B").includes(
+      `${marker}\n\nModel: gpt-5.6-sol high`,
+    ),
+  );
 
   git(repository, "push", "--quiet", "--set-upstream", "origin", "HEAD");
   const localHead = git(repository, "rev-parse", "HEAD");
@@ -116,5 +130,5 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
     "--body",
     "Local-only verification",
   ]);
-  assert.deepEqual(fs.readdirSync(messages), []);
+  assert.deepEqual(fs.readdirSync(messages), [STATE_DIRECTORY_NAME]);
 });

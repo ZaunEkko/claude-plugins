@@ -1,16 +1,11 @@
 {
   "name": "zaunekko",
-  "description": "ZaunEkko's private-first Claude Code marketplace for purpose-specific plugins and documented compatibility distributions.",
+  "description": "ZaunEkko's public-release-ready Claude Code marketplace for purpose-specific plugins and documented compatibility distributions.",
   "owner": {
     "name": "ZaunEkko",
     "url": "https://github.com/ZaunEkko"
   },
   "plugins": [
-    {
-      "name": "ekko-plugin-scaffold",
-      "source": "./plugins/ekko-plugin-scaffold",
-      "description": "A temporary Claude Code plugin scaffold by ZaunEkko. Future original plugins should use purpose-first names like ekko-agy-cli."
-    },
     {
       "name": "commit-commands",
       "source": "./plugins/commit-commands",

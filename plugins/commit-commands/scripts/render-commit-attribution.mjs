@@ -65,6 +65,7 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
     return { buffer, changed: false };
   }
 
+  const markerTarget = ranges[markerIndex];
   let modelTarget = null;
   let effortTarget = null;
   for (let index = markerIndex + 1; index < ranges.length; index += 1) {
@@ -99,6 +100,25 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
     });
   }
 
+  if (safeModel) {
+    const lineAfterMarker = ranges[markerIndex + 1] ?? null;
+    const markerHasBlankSeparator =
+      lineAfterMarker !== null && lineAfterMarker.contentEnd === lineAfterMarker.start;
+    if (!markerHasBlankSeparator) {
+      const markerLineEnding = buffer.subarray(markerTarget.contentEnd, markerTarget.end);
+      const separator = markerLineEnding.length > 0
+        ? markerLineEnding
+        : modelLineEnding.length > 0
+          ? modelLineEnding
+          : Buffer.from("\n", "utf8");
+      edits.push({
+        start: markerTarget.end,
+        end: markerTarget.end,
+        replacement: separator,
+      });
+    }
+  }
+
   if (effortTarget) {
     edits.push({
       start: effortTarget.start,
@@ -108,7 +128,8 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
   }
 
   let rendered = buffer;
-  for (const edit of edits.sort((left, right) => right.start - left.start)) {
+  for (const edit of edits.sort((left, right) =>
+    right.start - left.start || right.end - left.end)) {
     rendered = Buffer.concat([
       rendered.subarray(0, edit.start),
       edit.replacement,

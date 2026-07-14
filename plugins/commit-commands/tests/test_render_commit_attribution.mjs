@@ -31,7 +31,9 @@ test("replaces only the last Model line after the final attribution marker", () 
   assert.equal(result.changed, true);
   assert.equal(
     result.buffer.toString("utf8"),
-    original.replace("Model: stale two", "Model: gpt-5.6-sol"),
+    original
+      .replace(`${marker}\n`, `${marker}\n\n`)
+      .replace("Model: stale two", "Model: gpt-5.6-sol"),
   );
 });
 
@@ -46,7 +48,24 @@ test("uses the final marker and does not rewrite body Model lines", () => {
   const result = render(original, "Claude Opus 4.8");
   assert.equal(
     result.buffer.toString("utf8"),
-    original.replace("Model: active attribution", "Model: Claude Opus 4.8"),
+    original.replace(
+      `${marker}\nModel: active attribution`,
+      `${marker}\n\nModel: Claude Opus 4.8`,
+    ),
+  );
+});
+
+test("separates the attribution marker from Model with one blank line", () => {
+  const adjacent = `${marker}\nModel: stale\n`;
+  assert.equal(
+    render(adjacent, "gpt-5.6-sol").buffer.toString("utf8"),
+    `${marker}\n\nModel: gpt-5.6-sol\n`,
+  );
+
+  const separated = `${marker}\r\n\r\nModel: stale\r\n`;
+  assert.equal(
+    render(separated, "Claude Sonnet 5").buffer.toString("utf8"),
+    `${marker}\r\n\r\nModel: Claude Sonnet 5\r\n`,
   );
 });
 
@@ -63,18 +82,21 @@ test("combines effort into Model and removes legacy Effort lines", () => {
   const combined = render(withoutEffort, "gpt-5.6-sol", "xhigh").buffer.toString("utf8");
   assert.equal(
     combined,
-    withoutEffort.replace("Model: stale", "Model: gpt-5.6-sol xhigh"),
+    withoutEffort.replace(
+      `${marker}\nModel: stale`,
+      `${marker}\n\nModel: gpt-5.6-sol xhigh`,
+    ),
   );
   assert.match(combined, /^Effort: body value$/mu);
 
   const existing = `${marker}\r\nModel: stale\r\nEffort: low\r\n`;
   assert.equal(
     render(existing, "Claude Sonnet 5", "high").buffer.toString("utf8"),
-    `${marker}\r\nModel: Claude Sonnet 5 high\r\n`,
+    `${marker}\r\n\r\nModel: Claude Sonnet 5 high\r\n`,
   );
   assert.equal(
     render(existing, "Claude Sonnet 5", null).buffer.toString("utf8"),
-    `${marker}\r\nModel: Claude Sonnet 5\r\n`,
+    `${marker}\r\n\r\nModel: Claude Sonnet 5\r\n`,
   );
   assert.equal(
     render(existing, null, null).buffer.toString("utf8"),
@@ -108,15 +130,16 @@ test("preserves LF and CRLF plus all non-target bytes", () => {
     `Subject\r\n\r\n${marker}\r\nModel: Claude Opus 4.8\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n`,
   );
   const result = renderCommitBuffer(crlf, "gpt-5.6-sol");
-  const expected = Buffer.from(crlf.toString().replace("Model: Claude Opus 4.8", "Model: gpt-5.6-sol"));
+  const expected = Buffer.from(
+    `Subject\r\n\r\n${marker}\r\n\r\nModel: gpt-5.6-sol\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n`,
+  );
   assert.deepEqual(result.buffer, expected);
-  assert.equal(result.buffer.filter((byte) => byte === 0x0d).length, crlf.filter((byte) => byte === 0x0d).length);
 });
 
 test("treats shell metacharacters as text and rejects control characters or NUL", () => {
   const dangerous = `model; $(touch should-not-run) ' " $PATH`;
   const result = render(`${marker}\nModel: old\n`, dangerous);
-  assert.equal(result.buffer.toString(), `${marker}\nModel: ${dangerous}\n`);
+  assert.equal(result.buffer.toString(), `${marker}\n\nModel: ${dangerous}\n`);
   assert.throws(() => render(`${marker}\nModel: old\n`, "bad\ntrailer"), /not safe/u);
   assert.throws(
     () => renderCommitBuffer(Buffer.from(`${marker}\nModel: old\0\n`), "safe"),
@@ -146,7 +169,7 @@ test("writes changed files atomically and avoids writes when no target exists", 
     },
   });
   assert.equal(changed.changed, true);
-  assert.equal(fs.readFileSync(messageFile, "utf8"), `${marker}\nModel: gpt-5.6-sol\n`);
+  assert.equal(fs.readFileSync(messageFile, "utf8"), `${marker}\n\nModel: gpt-5.6-sol\n`);
 
   fs.writeFileSync(messageFile, "No attribution\n", "utf8");
   const before = fs.statSync(messageFile).mtimeMs;
