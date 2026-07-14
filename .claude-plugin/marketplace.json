@@ -1,15 +1,21 @@
 {
   "name": "zaunekko",
-  "description": "ZaunEkko's private-first Claude Code plugin marketplace for purpose-specific ekko-* plugins.",
+  "description": "ZaunEkko's public-release-ready Claude Code marketplace for purpose-specific plugins and documented compatibility distributions.",
   "owner": {
     "name": "ZaunEkko",
     "url": "https://github.com/ZaunEkko"
   },
   "plugins": [
     {
-      "name": "ekko-plugin-scaffold",
-      "source": "./plugins/ekko-plugin-scaffold",
-      "description": "A temporary Claude Code plugin scaffold by ZaunEkko. Future published plugins should use purpose-first names like ekko-agy-cli."
+      "name": "commit-commands",
+      "source": "./plugins/commit-commands",
+      "description": "A third-party compatibility distribution of Anthropic's commit-commands plugin with compact dynamic current-model attribution and optional effort metadata. Enable it instead of, not alongside, the official distribution.",
+      "author": {
+        "name": "ZaunEkko",
+        "url": "https://github.com/ZaunEkko"
+      },
+      "category": "Development",
+      "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/commit-commands"
     }
   ]
 }

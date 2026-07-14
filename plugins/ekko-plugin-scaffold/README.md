@@ -1,12 +1,12 @@
-# ekko-plugin-scaffold plugin
+# ekko-plugin-scaffold
 
-This is the temporary installable Claude Code plugin scaffold published from the `ZaunEkko/claude-plugins` marketplace.
+This directory preserves the repository's original marketplace scaffold as a historical, non-installable example. It is intentionally **not listed** in `.claude-plugin/marketplace.json` and is not a supported plugin release.
 
-The initial version intentionally contains no active skills, agents, hooks, or MCP servers yet. Component directories are kept in place so the first real capability can be added without changing the repository shape.
+Do not install or advertise `ekko-plugin-scaffold@zaunekko`.
 
-## Naming convention
+## Naming convention demonstrated
 
-Published plugins in this marketplace should use the pattern:
+Original plugins in this marketplace should use a purpose-first name:
 
 ```text
 ekko-<specific-purpose>
@@ -18,17 +18,13 @@ Examples:
 - `ekko-notion-tasks`
 - `ekko-browser-debug`
 
-Avoid generic names such as `claude-plugins`, `ekko-plugins`, or `ekko-skills` for installable plugins.
+Avoid generic installable names such as `claude-plugins`, `ekko-plugins`, or `ekko-skills`.
 
-## Component directories
+## Example component directories
 
-- `skills/`: future skills in `skills/<skill-name>/SKILL.md`.
-- `agents/`: future agent definitions as Markdown files.
-- `hooks/`: future hook configuration in `hooks/hooks.json`.
+- `skills/`: skills in `skills/<skill-name>/SKILL.md`.
+- `agents/`: agent definitions as Markdown files.
+- `hooks/`: hook configuration in `hooks/hooks.json`.
 - `scripts/`: helper scripts used by plugin components.
 
-## Install identity
-
-```text
-ekko-plugin-scaffold@zaunekko
-```
+A real plugin should replace this placeholder description, add focused behavior and tests, and be reviewed before being added to the marketplace catalog.

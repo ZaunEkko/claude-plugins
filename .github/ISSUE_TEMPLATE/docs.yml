@@ -1,0 +1,65 @@
+name: Documentation / 文档问题
+description: Report missing, incorrect, outdated, or unclear documentation / 报告缺失、错误、过期或不清晰的文档
+title: "[Docs]: "
+body:
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language / 语言
+      options:
+        - 简体中文
+        - English
+        - 繁體中文
+        - 日本語
+        - 한국어
+        - Multiple languages
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Page or section / 页面或章节
+      placeholder: "README.md#快速开始 or docs/commit-commands/README.md"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Problem type / 问题类型
+      options:
+        - Incorrect command or behavior
+        - Missing information
+        - Outdated information
+        - Broken link
+        - Translation mismatch
+        - Unclear wording
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current documentation / 当前内容
+      description: Quote only the relevant excerpt or describe what is missing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Suggested correction / 建议修改
+      description: Explain the current Claude Code behavior or provide proposed wording and sources when possible.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist / 检查清单
+      options:
+        - label: I checked the current language and the canonical Simplified Chinese documentation where applicable.
+        - label: I removed secrets, private transcript content, and sensitive paths.
+          required: true

@@ -1,0 +1,97 @@
+name: Bug report / 缺陷报告
+description: Report a reproducible marketplace or plugin problem / 报告可复现的市场或插件问题
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Remove secrets, tokens, private transcript content, and sensitive paths before submitting.
+        感谢反馈。提交前请移除密钥、token、私人 transcript 内容与敏感路径。
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area / 影响范围
+      options:
+        - commit-commands
+        - Marketplace catalog or installation
+        - Documentation or localization
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Claude Code and plugin version / Claude Code 与插件版本
+      description: Include `claude --version` and the installed plugin version when available.
+      placeholder: "Claude Code ..., commit-commands ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Installation scope / 安装作用域
+      options:
+        - user
+        - project
+        - local
+        - managed
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: OS, shell, Git, Node.js, and gh versions when relevant.
+      placeholder: "Windows 11, Git Bash, Git 2.x, Node.js 22.x"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps / 复现步骤
+      description: Provide the smallest deterministic sequence.
+      placeholder: |
+        1. Add marketplace ...
+        2. Install plugin ...
+        3. Run command ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics / 脱敏诊断信息
+      description: Include relevant output from plugin list/details, validation, tests, or hooks. Do not include credentials or complete transcripts.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist / 检查清单
+      options:
+        - label: I verified that the official and ZaunEkko `commit-commands` distributions are not both enabled in the same scope.
+        - label: I ran `/reload-plugins` or started a new session after changing the plugin.
+        - label: I removed secrets, private repository content, and personal data.
+          required: true
+        - label: This is not a privately reportable security vulnerability.
+          required: true
