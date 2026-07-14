@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-14
+
 ### Added
 
 - Added `commit-commands@zaunekko`, a same-name third-party compatibility distribution derived from Anthropic's official `commit-commands` plugin.
