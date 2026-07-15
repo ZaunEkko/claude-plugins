@@ -82,11 +82,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 行为边界：
 
+- 如果 Claude 先生成另一种 attribution marker，wrapper 会在动态写入模型与 effort 前恢复为配置的 `Generated with [Claude Code](https://claude.ai/code)`。
 - 只修改最终 Claude Code attribution marker 后的目标 `Model:` 行。
 - marker 与 `Model:` 之间保证一行空行，不重复已有分隔。
 - effort 追加到同一行；旧的独立 `Effort:` 行会被移除。
 - 可靠模型不可用时移除 attribution 的 `Model:` 行。
-- 如果 marker 后没有目标 `Model:` 行，commit message 保持字节不变。
+- marker 后没有目标 `Model:` 行时，插入动态解析的模型与 effort；commit message 完全没有 marker 时，追加完整标准 attribution。可靠模型不可用时不会伪造静态值。
 - 保留 LF/CRLF 和其他非目标字节。
 
 ## 模型与 effort 来源

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- Restored the canonical `claude.ai/code` commit attribution, dynamic current-model/effort rendering, and the requested blank separator when Claude supplies an alternate generated marker, omits `Model:`, or produces no attribution block.
+
 ## 0.2.0 - 2026-07-14
 
 ### Added

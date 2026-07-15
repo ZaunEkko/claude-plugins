@@ -10,10 +10,25 @@ import {
 } from "../scripts/render-commit-attribution.mjs";
 
 const marker = "Generated with [Claude Code](https://claude.ai/code)";
+const generatedMarkers = [
+  "🤖 Generated with [Claude Code](https://claude.ai/code)",
+  "Generated with [Claude Code](https://claude.com/claude-code)",
+  "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+];
 
 function render(text, model, effort = null) {
   return renderCommitBuffer(Buffer.from(text, "utf8"), model, effort);
 }
+
+test("normalizes generated marker variants to the configured attribution", () => {
+  for (const generatedMarker of generatedMarkers) {
+    const original = `${generatedMarker}\nModel: Claude Opus 4.8\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
+    assert.equal(
+      render(original, "gpt-5.6-sol", "xhigh").buffer.toString("utf8"),
+      `${marker}\n\nModel: gpt-5.6-sol xhigh\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
+    );
+  }
+});
 
 test("replaces only the last Model line after the final attribution marker", () => {
   const original = [
@@ -109,22 +124,46 @@ test("combines effort into Model and removes legacy Effort lines", () => {
   );
 });
 
-test("leaves messages byte-for-byte unchanged without a target attribution Model line", () => {
-  for (const original of [
-    "Subject\n\nModel: body only\n",
-    `Subject\n\n${marker}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
-  ]) {
-    const input = Buffer.from(original);
-    const result = renderCommitBuffer(input, "Claude Sonnet 5");
-    assert.equal(result.changed, false);
-    assert.equal(result.buffer, input);
-    assert.deepEqual(result.buffer, Buffer.from(original));
+test("adds dynamic attribution when the configured message omits Model", () => {
+  for (const separator of ["\n", "\n\n"]) {
+    const original = `Subject\n\n${marker}${separator}Co-Authored-By: Claude <noreply@anthropic.com>\n`;
+    assert.equal(
+      render(original, "gpt-5.6-sol", "xhigh").buffer.toString("utf8"),
+      `Subject\n\n${marker}\n\nModel: gpt-5.6-sol xhigh\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
+    );
   }
+});
+
+test("adds the full canonical attribution when the configured message omits it", () => {
+  const withoutAttribution = "Subject\n\nModel: body only\n";
+  assert.equal(
+    render(withoutAttribution, "gpt-5.6-sol", "xhigh").buffer.toString("utf8"),
+    `${withoutAttribution}\n${marker}\n\nModel: gpt-5.6-sol xhigh\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
+  );
+
+  const coAuthorOnly = "Subject\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n";
+  assert.equal(
+    render(coAuthorOnly, "gpt-5.6-sol", "xhigh").buffer.toString("utf8"),
+    `Subject\n\n${marker}\n\nModel: gpt-5.6-sol xhigh\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
+  );
+
+  const input = Buffer.from(withoutAttribution);
+  const unavailable = renderCommitBuffer(input, null, null);
+  assert.equal(unavailable.changed, false);
+  assert.equal(unavailable.buffer, input);
 });
 
 test("preserves LF and CRLF plus all non-target bytes", () => {
   const lf = `Subject\n\n${marker}\nModel:\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
   assert.equal(render(lf, null).buffer.toString(), lf.replace("Model:\n", ""));
+
+  const noAttributionCrLf = Buffer.from("Subject\r\n");
+  assert.deepEqual(
+    renderCommitBuffer(noAttributionCrLf, "gpt-5.6-sol", "xhigh").buffer,
+    Buffer.from(
+      `Subject\r\n\r\n${marker}\r\n\r\nModel: gpt-5.6-sol xhigh\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n`,
+    ),
+  );
 
   const crlf = Buffer.from(
     `Subject\r\n\r\n${marker}\r\nModel: Claude Opus 4.8\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n`,

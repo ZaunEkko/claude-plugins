@@ -62,7 +62,7 @@ Model: <model> [effort]
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
-마지막 Claude Code marker 뒤의 `Model:`만 수정하고 빈 줄을 중복하지 않으면서 하나 보장합니다. 이전의 독립 `Effort:` 줄을 제거하고 LF/CRLF 및 대상이 아닌 byte를 보존합니다. 신뢰 가능한 모델이 없으면 모델 줄을 제거하며 marker 뒤에 대상 줄이 없으면 message를 byte 단위로 변경하지 않습니다.
+마지막 Claude Code marker 뒤의 attribution을 갱신하고 빈 줄을 중복하지 않으면서 하나 보장합니다. 이전의 독립 `Effort:` 줄을 제거하고 LF/CRLF 및 대상이 아닌 byte를 보존합니다. Claude가 다른 attribution marker를 생성하면 wrapper가 render 전에 설정된 `Generated with [Claude Code](https://claude.ai/code)`로 복원합니다. `Model:`이 없으면 동적으로 확인한 값을 삽입하고 marker 자체가 없으면 완전한 표준 attribution block을 추가합니다. 신뢰 가능한 모델이 없을 때는 정적 값을 만들어 내지 않습니다.
 
 모델은 현재 transcript의 최신 유효 assistant `message.model`, SessionStart model, 설정된 기본 `model` 순서로 확인합니다. Effort는 `CLAUDE_EFFORT`, 설정의 `effort`/`effortLevel` 순서입니다. 값은 한 줄 데이터로 검증되며 shell code로 실행되지 않습니다.
 
