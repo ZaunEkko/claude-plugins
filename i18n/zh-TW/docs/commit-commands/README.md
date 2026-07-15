@@ -62,7 +62,7 @@ Model: <model> [effort]
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
-Renderer 只修改最後一個 Claude Code marker 後的 `Model:`，確保一行空白分隔但不重複，移除舊的獨立 `Effort:`，保留 LF/CRLF 與非目標位元組，無可靠模型時移除模型行；marker 後沒有目標行時訊息維持位元組不變。
+Renderer 會處理最後一個 Claude Code marker 後的 attribution，確保一行空白分隔但不重複，移除舊的獨立 `Effort:`，並保留 LF/CRLF 與非目標位元組。若 Claude 先產生另一種 attribution marker，wrapper 會在渲染前恢復為設定的 `Generated with [Claude Code](https://claude.ai/code)`。缺少 `Model:` 時會插入動態解析結果；完全沒有 marker 時會追加完整標準 attribution。無可靠模型時不會虛構靜態值。
 
 模型來源依序為目前 transcript 最新有效 assistant `message.model`、SessionStart model、設定的預設 `model`，最後才省略。Effort 依序取 `CLAUDE_EFFORT`、設定的 `effort`/`effortLevel`，不可用時只寫模型。這些值只作為單行資料驗證，不會當成 shell 程式碼執行。
 
