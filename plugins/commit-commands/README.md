@@ -85,7 +85,8 @@ Example:
 
 Behavioral boundaries:
 
-- If the attribution has no matching `Model:` line, the message remains byte-for-byte unchanged; the plugin does not add one.
+- If Claude supplies its alternate generated marker, the wrapper restores the configured `Generated with [Claude Code](https://claude.ai/code)` attribution before rendering the dynamic model and effort.
+- If the attribution marker exists without a `Model:` line, the wrapper inserts the dynamically resolved model and effort. If the commit message has no attribution marker, it appends the complete canonical attribution block. When no reliable model exists, it does not invent a static value.
 - When a target `Model:` line exists, the renderer ensures the final attribution marker is followed by a blank line without duplicating an existing separator.
 - A `Model:` line in the commit body before the final Claude Code attribution marker is not modified.
 - If transcript and SessionStart do not provide a valid model, the plugin uses the user's configured default `model` with low confidence.

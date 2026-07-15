@@ -15,6 +15,12 @@ import {
 const pluginRoot = path.resolve(import.meta.dirname, "..");
 const wrapper = path.join(pluginRoot, "scripts", "commit-with-dynamic-attribution.sh");
 const marker = "Generated with [Claude Code](https://claude.ai/code)";
+const generatedMarkers = [
+  marker,
+  "🤖 Generated with [Claude Code](https://claude.ai/code)",
+  "Generated with [Claude Code](https://claude.com/claude-code)",
+  "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+];
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {
@@ -85,8 +91,9 @@ function wrapperEnvironment(t, state, { includeStatePointer = false } = {}) {
   };
 }
 
-function commitMessage(model = "Claude Opus 4.8") {
-  return `test: dynamic attribution\n\n${marker}\nModel: ${model}\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`;
+function commitMessage(model = "Claude Opus 4.8", attributionMarker = marker) {
+  const modelBlock = model === null ? "" : `Model: ${model}\n\n`;
+  return `test: dynamic attribution\n\n${attributionMarker}\n${modelBlock}Co-Authored-By: Claude <noreply@anthropic.com>\n`;
 }
 
 function renderedCommitMessage(model, effort) {
@@ -110,21 +117,27 @@ test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identif
     TMPDIR: toBashPath(temporaryRoot),
   };
   delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
-  fs.appendFileSync(path.join(repository, "file.txt"), "changed\n");
-  git(repository, "add", "file.txt");
+  const cases = [
+    ...generatedMarkers.map((attributionMarker) => ({ attributionMarker, model: "Claude Opus 4.8" })),
+    { attributionMarker: marker, model: null },
+  ];
+  for (const [index, fixture] of cases.entries()) {
+    fs.appendFileSync(path.join(repository, "file.txt"), `changed ${index}\n`);
+    git(repository, "add", "file.txt");
 
-  const result = run("bash", [wrapper], {
-    cwd: repository,
-    env: environment,
-    input: commitMessage(),
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Model: gpt-5\.6-sol xhigh/u);
-  assert.doesNotMatch(result.stdout, /^Effort:/mu);
-  assert.equal(
-    git(repository, "log", "-1", "--format=%B").trimEnd(),
-    renderedCommitMessage("gpt-5.6-sol", "xhigh").trimEnd(),
-  );
+    const result = run("bash", [wrapper], {
+      cwd: repository,
+      env: environment,
+      input: commitMessage(fixture.model, fixture.attributionMarker),
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Model: gpt-5\.6-sol xhigh/u);
+    assert.doesNotMatch(result.stdout, /^Effort:/mu);
+    assert.equal(
+      git(repository, "log", "-1", "--format=%B").trimEnd(),
+      renderedCommitMessage("gpt-5.6-sol", "xhigh").trimEnd(),
+    );
+  }
   assert.deepEqual(fs.readdirSync(temporaryRoot), [STATE_DIRECTORY_NAME]);
 });
 

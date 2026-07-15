@@ -62,7 +62,7 @@ Model: <model> [effort]
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
-最後の Claude Code marker 後の `Model:` だけを更新し、空行を重複させず 1 行確保します。古い独立 `Effort:` を削除し、LF/CRLF と非対象 byte を保持します。信頼できるモデルがない場合はモデル行を削除し、marker 後に対象行がなければ message は byte 単位で変更しません。
+最後の Claude Code marker 後の attribution を更新し、空行を重複させず 1 行確保します。古い独立 `Effort:` を削除し、LF/CRLF と非対象 byte を保持します。Claude が別の attribution marker を生成した場合、wrapper は render 前に設定済みの `Generated with [Claude Code](https://claude.ai/code)` へ戻します。`Model:` がなければ動的な解決結果を挿入し、marker 自体がなければ完全な標準 attribution block を追加します。信頼できるモデルがない場合、静的な値を捏造しません。
 
 モデルは現在 transcript の最新有効 assistant `message.model`、SessionStart model、設定済み既定 `model` の順で解決します。Effort は `CLAUDE_EFFORT`、設定の `effort`/`effortLevel` の順です。値は単一行データとして検証され、shell code として実行されません。
 

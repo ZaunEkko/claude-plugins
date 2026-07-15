@@ -62,7 +62,7 @@ Model: <model> [effort]
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
-The renderer targets only the `Model:` line after the final Claude Code marker, guarantees one blank separator without duplicating an existing one, removes legacy standalone `Effort:` lines, preserves LF/CRLF and non-target bytes, and removes the model line when no reliable model is available. If the final marker has no target model line, the message remains byte-identical.
+The renderer targets the attribution after the final Claude Code marker, guarantees one blank separator without duplicating an existing one, removes legacy standalone `Effort:` lines, and preserves LF/CRLF and non-target bytes. If Claude supplies its alternate generated marker, the wrapper restores the configured `Generated with [Claude Code](https://claude.ai/code)` attribution before rendering. A missing `Model:` line is inserted from the dynamic resolution; if the message has no marker, the complete canonical attribution block is appended. No static value is invented when no reliable model is available.
 
 Model resolution order:
 

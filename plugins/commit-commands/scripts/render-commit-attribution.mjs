@@ -14,8 +14,10 @@ import {
 } from "./resolve-session-model.mjs";
 
 const ATTRIBUTION_MARKER = "Generated with [Claude Code](https://claude.ai/code)";
+const ATTRIBUTION_MARKER_PATTERN = /^(?:🤖 )?Generated with \[Claude Code\]\(https:\/\/(?:claude\.ai\/code|claude\.com\/claude-code)\)$/u;
 const MODEL_LINE = /^Model:\s*.*$/u;
 const EFFORT_LINE = /^Effort:\s*.*$/u;
+const CO_AUTHOR_LINE = /^Co-Authored-By:\s*Claude <noreply@anthropic\.com>$/u;
 
 function splitLineRanges(buffer) {
   const ranges = [];
@@ -53,16 +55,86 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
 
   const ranges = splitLineRanges(buffer);
   let markerIndex = -1;
+  let coAuthorIndex = -1;
   for (let index = 0; index < ranges.length; index += 1) {
     const range = ranges[index];
     const line = buffer.subarray(range.start, range.contentEnd).toString("utf8");
-    if (line === ATTRIBUTION_MARKER) {
+    if (ATTRIBUTION_MARKER_PATTERN.test(line)) {
       markerIndex = index;
+    }
+    if (CO_AUTHOR_LINE.test(line)) {
+      coAuthorIndex = index;
     }
   }
 
+  const modelAttribution = safeModel
+    ? safeEffort ? `${safeModel} ${safeEffort}` : safeModel
+    : null;
   if (markerIndex < 0) {
-    return { buffer, changed: false };
+    if (!modelAttribution) {
+      return { buffer, changed: false };
+    }
+
+    const preferredRange = coAuthorIndex >= 0 ? ranges[coAuthorIndex] : ranges.at(-1);
+    const preferredEnding = preferredRange
+      ? buffer.subarray(preferredRange.contentEnd, preferredRange.end)
+      : Buffer.alloc(0);
+    let lineEnding = preferredEnding;
+    if (lineEnding.length === 0) {
+      for (let index = ranges.length - 1; index >= 0; index -= 1) {
+        const range = ranges[index];
+        const candidate = buffer.subarray(range.contentEnd, range.end);
+        if (candidate.length > 0) {
+          lineEnding = candidate;
+          break;
+        }
+      }
+    }
+    if (lineEnding.length === 0) {
+      lineEnding = Buffer.from("\n", "utf8");
+    }
+    const lineEndingText = lineEnding.toString("utf8");
+    const attributionPrefix = Buffer.from(
+      `${ATTRIBUTION_MARKER}${lineEndingText}${lineEndingText}Model: ${modelAttribution}${lineEndingText}${lineEndingText}`,
+      "utf8",
+    );
+
+    if (coAuthorIndex >= 0) {
+      let insertionStart = ranges[coAuthorIndex].start;
+      for (let index = coAuthorIndex - 1; index >= 0; index -= 1) {
+        const range = ranges[index];
+        if (range.contentEnd !== range.start) {
+          break;
+        }
+        insertionStart = range.start;
+      }
+      const leadingSeparator = insertionStart > 0 ? lineEnding : Buffer.alloc(0);
+      return {
+        buffer: Buffer.concat([
+          buffer.subarray(0, insertionStart),
+          leadingSeparator,
+          attributionPrefix,
+          buffer.subarray(ranges[coAuthorIndex].start),
+        ]),
+        changed: true,
+      };
+    }
+
+    const doubleLineEnding = Buffer.concat([lineEnding, lineEnding]);
+    const separator = buffer.length === 0 || buffer.subarray(-doubleLineEnding.length).equals(doubleLineEnding)
+      ? Buffer.alloc(0)
+      : buffer.subarray(-lineEnding.length).equals(lineEnding)
+        ? lineEnding
+        : doubleLineEnding;
+    return {
+      buffer: Buffer.concat([
+        buffer,
+        separator,
+        attributionPrefix,
+        Buffer.from(`Co-Authored-By: Claude <noreply@anthropic.com>${lineEndingText}`, "utf8"),
+      ]),
+      changed: true,
+    };
   }
 
   const markerTarget = ranges[markerIndex];
@@ -79,44 +151,74 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
     }
   }
 
-  if (!modelTarget) {
-    return { buffer, changed: false };
-  }
-
   const edits = [];
-  const modelLineEnding = buffer.subarray(modelTarget.contentEnd, modelTarget.end);
-  if (safeModel) {
-    const modelAttribution = safeEffort ? `${safeModel} ${safeEffort}` : safeModel;
+  const markerText = buffer.subarray(markerTarget.start, markerTarget.contentEnd).toString("utf8");
+  const markerLineEnding = buffer.subarray(markerTarget.contentEnd, markerTarget.end);
+  const lineEnding = markerLineEnding.length > 0 ? markerLineEnding : Buffer.from("\n", "utf8");
+  if (markerText !== ATTRIBUTION_MARKER) {
     edits.push({
-      start: modelTarget.start,
-      end: modelTarget.end,
-      replacement: Buffer.concat([Buffer.from(`Model: ${modelAttribution}`, "utf8"), modelLineEnding]),
-    });
-  } else {
-    edits.push({
-      start: modelTarget.start,
-      end: modelTarget.end,
-      replacement: Buffer.alloc(0),
+      start: markerTarget.start,
+      end: markerTarget.end,
+      replacement: Buffer.concat([Buffer.from(ATTRIBUTION_MARKER, "utf8"), markerLineEnding]),
     });
   }
 
-  if (safeModel) {
-    const lineAfterMarker = ranges[markerIndex + 1] ?? null;
-    const markerHasBlankSeparator =
-      lineAfterMarker !== null && lineAfterMarker.contentEnd === lineAfterMarker.start;
-    if (!markerHasBlankSeparator) {
-      const markerLineEnding = buffer.subarray(markerTarget.contentEnd, markerTarget.end);
-      const separator = markerLineEnding.length > 0
-        ? markerLineEnding
-        : modelLineEnding.length > 0
-          ? modelLineEnding
-          : Buffer.from("\n", "utf8");
+  if (modelTarget) {
+    const modelLineEnding = buffer.subarray(modelTarget.contentEnd, modelTarget.end);
+    if (modelAttribution) {
       edits.push({
-        start: markerTarget.end,
-        end: markerTarget.end,
-        replacement: separator,
+        start: modelTarget.start,
+        end: modelTarget.end,
+        replacement: Buffer.concat([Buffer.from(`Model: ${modelAttribution}`, "utf8"), modelLineEnding]),
+      });
+    } else {
+      edits.push({
+        start: modelTarget.start,
+        end: modelTarget.end,
+        replacement: Buffer.alloc(0),
       });
     }
+
+    if (modelAttribution) {
+      const lineAfterMarker = ranges[markerIndex + 1] ?? null;
+      const markerHasBlankSeparator =
+        lineAfterMarker !== null && lineAfterMarker.contentEnd === lineAfterMarker.start;
+      if (!markerHasBlankSeparator) {
+        const separator = markerLineEnding.length > 0
+          ? markerLineEnding
+          : modelLineEnding.length > 0
+            ? modelLineEnding
+            : lineEnding;
+        edits.push({
+          start: markerTarget.end,
+          end: markerTarget.end,
+          replacement: separator,
+        });
+      }
+    }
+  } else if (modelAttribution) {
+    let firstContentIndex = markerIndex + 1;
+    while (firstContentIndex < ranges.length) {
+      const range = ranges[firstContentIndex];
+      if (range.contentEnd !== range.start) {
+        break;
+      }
+      firstContentIndex += 1;
+    }
+    const insertionEnd = ranges[firstContentIndex]?.start ?? buffer.length;
+    const beforeModel = markerLineEnding.length > 0
+      ? lineEnding
+      : Buffer.concat([lineEnding, lineEnding]);
+    edits.push({
+      start: markerTarget.end,
+      end: insertionEnd,
+      replacement: Buffer.concat([
+        beforeModel,
+        Buffer.from(`Model: ${modelAttribution}`, "utf8"),
+        lineEnding,
+        lineEnding,
+      ]),
+    });
   }
 
   if (effortTarget) {
@@ -125,6 +227,10 @@ export function renderCommitBuffer(buffer, modelDisplay, effortDisplay = null) {
       end: effortTarget.end,
       replacement: Buffer.alloc(0),
     });
+  }
+
+  if (edits.length === 0) {
+    return { buffer, changed: false };
   }
 
   let rendered = buffer;
