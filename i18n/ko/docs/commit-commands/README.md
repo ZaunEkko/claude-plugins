@@ -2,7 +2,7 @@
 
 [简体中文](../../../../docs/commit-commands/README.md) · [English](../../../en/docs/commit-commands/README.md) · [繁體中文](../../../zh-TW/docs/commit-commands/README.md) · [日本語](../../../ja/docs/commit-commands/README.md) · [한국어](README.md)
 
-`commit-commands@zaunekko`는 Anthropic의 공식 동일 이름 플러그인에서 파생된 제3자 호환 배포입니다. 설치 이름, 명령 네임스페이스와 Git 워크플로를 유지하면서 commit attribution의 `Model:`을 현재 Claude Code 세션 모델과 선택적 effort로 업데이트합니다.
+`commit-commands@zaunekko`는 Anthropic의 공식 동일 이름 플러그인에서 파생된 제3자 호환 배포입니다. 설치 이름, 명령 네임스페이스와 Git 워크플로를 유지하면서 commit attribution의 `Model:`을 현재 Claude Code 세션 모델과 선택적 effort로 업데이트하고, Claude Code 내부의 직접 `git commit`이 attribution wrapper를 우회하지 못하게 합니다.
 
 ZaunEkko가 유지관리하며 Anthropic 공식 릴리스가 아닙니다.
 
@@ -32,6 +32,12 @@ claude plugin enable commit-commands@zaunekko --scope user
 | `/commit-commands:clean_gone` | plan과 명시적 확인 후, 정확한 `refs/remotes/...` upstream이 없고 commit이 다른 ref에 보존된 로컬 브랜치와 clean worktree를 안전하게 정리. |
 
 Claude Code는 사용자 commands를 skills로 취급하지만 공식 인터페이스 호환을 위해 `commands/` 구조를 유지합니다.
+
+## wrapper를 우회하는 직접 commit 방지
+
+`PreToolUse` Bash guard는 Claude Code가 실행하기 전에 직접 `git commit`, `git.exe commit`, 그리고 `git -C <경로> commit` 같은 일반적인 Git 전역 옵션 형식을 거부합니다. 대신 `/commit-commands:commit`, `/commit-commands:commit-push-pr` 또는 플러그인 attribution wrapper를 사용하세요.
+
+이 guard는 Claude Code의 Bash 도구 호출에만 적용됩니다. 로컬 또는 전역 Git hook을 설치하지 않으며 터미널, IDE, Git GUI, CI에서 만드는 commit에는 영향을 주지 않습니다. `status`, `diff`, `log`, `push` 같은 commit 이외의 Git 명령과 wrapper의 최상위 호출은 계속 허용됩니다.
 
 ## gone 브랜치 안전 정리
 
@@ -70,7 +76,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 Wrapper는 비공개 임시 message를 만들고 attribution을 원자적으로 업데이트하며 render 성공 후에만 `git commit -F`를 실행합니다. Git hook 실패를 그대로 전달하고 성공, 실패 또는 중단 후 임시 파일을 정리합니다. commit 실패 후 push하거나 push 실패 후 PR을 만들지 않습니다.
 
-자동 SessionStart/SessionEnd hooks와 shell wrapper가 포함됩니다. 설치 전 [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json)과 [`scripts/`](../../../../plugins/commit-commands/scripts/)를 검토하세요.
+자동 `PreToolUse`, SessionStart, SessionEnd hooks와 shell wrapper가 포함됩니다. 설치 전 [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json)과 [`scripts/`](../../../../plugins/commit-commands/scripts/)를 검토하세요.
 
 ## 요구 사항과 업데이트
 

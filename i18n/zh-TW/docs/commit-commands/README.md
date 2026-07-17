@@ -2,7 +2,7 @@
 
 [简体中文](../../../../docs/commit-commands/README.md) · [English](../../../en/docs/commit-commands/README.md) · [繁體中文](README.md) · [日本語](../../../ja/docs/commit-commands/README.md) · [한국어](../../../ko/docs/commit-commands/README.md)
 
-`commit-commands@zaunekko` 是 Anthropic 官方同名外掛的第三方相容分發。它保留安裝名稱、命令命名空間與 Git 工作流程，並把 commit attribution 的 `Model:` 更新為目前 Claude Code 工作階段模型與可用 effort。
+`commit-commands@zaunekko` 是 Anthropic 官方同名外掛的第三方相容分發。它保留安裝名稱、命令命名空間與 Git 工作流程，把 commit attribution 的 `Model:` 更新為目前 Claude Code 工作階段模型與可用 effort，並阻止 Claude Code 直接執行原生 `git commit` 來繞過 attribution wrapper。
 
 本分發由 ZaunEkko 維護，並非 Anthropic 官方發布。
 
@@ -32,6 +32,12 @@ claude plugin enable commit-commands@zaunekko --scope user
 | `/commit-commands:clean_gone` | 在規劃並明確確認後，安全清理精確 `refs/remotes/...` 上游已不存在，且 commit 仍由其他 ref 保留的本機分支與乾淨 worktree。 |
 
 Claude Code 已將自訂 commands 統一為 skills 語意；本外掛保留 `commands/` 只是為了相容官方介面。
+
+## 防止直接 commit 繞過 wrapper
+
+`PreToolUse` Bash guard 會在 Claude Code 執行前拒絕直接的 `git commit`、`git.exe commit`，以及 `git -C <路徑> commit` 等常見 Git 全域參數形式。請改用 `/commit-commands:commit`、`/commit-commands:commit-push-pr` 或外掛 attribution wrapper。
+
+此 guard 只作用於 Claude Code 的 Bash 工具呼叫，不會安裝本機或全域 Git hooks，也不影響終端、IDE、Git GUI 或 CI 的 commit。`status`、`diff`、`log`、`push` 等非 commit Git 命令與 wrapper 的頂層呼叫仍可正常執行。
 
 ## 安全清理 gone 分支
 
@@ -70,7 +76,7 @@ Renderer 會處理最後一個 Claude Code marker 後的 attribution，確保一
 
 Wrapper 先建立私有暫存訊息，原子更新 attribution，只有渲染成功才執行 `git commit -F`，保留 Git hook 失敗狀態，並在成功、失敗或中斷後清理暫存檔。`commit-push-pr` 不會在 commit 失敗後 push，也不會在 push 失敗後建立 PR。
 
-外掛包含自動 SessionStart/SessionEnd hooks 與 shell wrapper。安裝前請檢查 [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json) 與 [`scripts/`](../../../../plugins/commit-commands/scripts/)。
+外掛包含自動 `PreToolUse`、SessionStart、SessionEnd hooks 與 shell wrapper。安裝前請檢查 [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json) 與 [`scripts/`](../../../../plugins/commit-commands/scripts/)。
 
 ## 需求與更新
 
