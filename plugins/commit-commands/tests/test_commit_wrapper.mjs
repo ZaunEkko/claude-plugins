@@ -141,6 +141,123 @@ test("commits with the transcript model when only CLAUDE_CODE_SESSION_ID identif
   assert.deepEqual(fs.readdirSync(temporaryRoot), [STATE_DIRECTORY_NAME]);
 });
 
+test("explicit state option binds a detached wrapper to one session", (t) => {
+  const repository = createRepository(t);
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-explicit-root-"));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const explicitState = createState(t, "gpt-5.6-sol", { tmpDirectory: temporaryRoot });
+  const environmentState = createState(t, "claude-opus-4-8", { tmpDirectory: temporaryRoot });
+  fs.appendFileSync(path.join(repository, "file.txt"), "explicit state\n");
+  git(repository, "add", "file.txt");
+
+  const environment = {
+    ...process.env,
+    ANTHROPIC_MODEL: "environment-fallback",
+    CLAUDE_PLUGIN_ROOT: pluginRoot,
+    CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
+    CLAUDE_COMMIT_COMMANDS_STATE_FILE: environmentState.stateFile,
+    CLAUDE_EFFORT: "high",
+    TEMP: toBashPath(temporaryRoot),
+    TMP: toBashPath(temporaryRoot),
+    TMPDIR: toBashPath(temporaryRoot),
+  };
+  delete environment.CLAUDE_CODE_SESSION_ID;
+
+  const result = run("bash", [
+    wrapper,
+    "--claude-state-file",
+    explicitState.stateFile,
+  ], {
+    cwd: repository,
+    env: environment,
+    input: commitMessage(),
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Model: gpt-5\.6-sol high/u);
+  assert.equal(
+    git(repository, "log", "-1", "--format=%B").trimEnd(),
+    renderedCommitMessage("gpt-5.6-sol", "high").trimEnd(),
+  );
+  assert.deepEqual(fs.readdirSync(temporaryRoot), [STATE_DIRECTORY_NAME]);
+});
+
+test("invalid explicit state prevents commit without falling through", (t) => {
+  const repository = createRepository(t);
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-invalid-state-"));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const environmentState = createState(t, "claude-opus-4-8", { tmpDirectory: temporaryRoot });
+  const missingState = path.join(temporaryRoot, STATE_DIRECTORY_NAME, "missing.json");
+  fs.appendFileSync(path.join(repository, "file.txt"), "invalid explicit state\n");
+  git(repository, "add", "file.txt");
+  const before = git(repository, "rev-list", "--count", "HEAD").trim();
+
+  const environment = {
+    ...process.env,
+    ANTHROPIC_MODEL: "environment-fallback",
+    CLAUDE_PLUGIN_ROOT: pluginRoot,
+    CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
+    CLAUDE_COMMIT_COMMANDS_STATE_FILE: environmentState.stateFile,
+    CLAUDE_EFFORT: "high",
+    TEMP: toBashPath(temporaryRoot),
+    TMP: toBashPath(temporaryRoot),
+    TMPDIR: toBashPath(temporaryRoot),
+  };
+  delete environment.CLAUDE_CODE_SESSION_ID;
+
+  const result = run("bash", [
+    wrapper,
+    `--claude-state-file=${missingState}`,
+  ], {
+    cwd: repository,
+    env: environment,
+    input: commitMessage(),
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /explicit session state file is unavailable or invalid/u);
+  assert.equal(git(repository, "rev-list", "--count", "HEAD").trim(), before);
+  assert.deepEqual(fs.readdirSync(temporaryRoot), [STATE_DIRECTORY_NAME]);
+});
+
+test("uses ANTHROPIC_MODEL before settings when detached from session state", (t) => {
+  const repository = createRepository(t);
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-environment-"));
+  t.after(() => fs.rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const configDirectory = path.join(temporaryDirectory, "config");
+  const messageDirectory = path.join(temporaryDirectory, "messages");
+  fs.mkdirSync(configDirectory);
+  fs.mkdirSync(messageDirectory);
+  fs.writeFileSync(path.join(configDirectory, "settings.json"), JSON.stringify({ model: "opus" }));
+  fs.appendFileSync(path.join(repository, "file.txt"), "environment model\n");
+  git(repository, "add", "file.txt");
+
+  const environment = {
+    ...process.env,
+    ANTHROPIC_MODEL: "gpt-5.6-sol",
+    CLAUDE_PLUGIN_ROOT: pluginRoot,
+    CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
+    CLAUDE_CONFIG_DIR: configDirectory,
+    CLAUDE_EFFORT: "xhigh",
+    TEMP: toBashPath(messageDirectory),
+    TMP: toBashPath(messageDirectory),
+    TMPDIR: toBashPath(messageDirectory),
+  };
+  delete environment.CLAUDE_CODE_SESSION_ID;
+  delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
+
+  const result = run("bash", [wrapper], {
+    cwd: repository,
+    env: environment,
+    input: commitMessage(),
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Model: gpt-5\.6-sol xhigh/u);
+  assert.equal(
+    git(repository, "log", "-1", "--format=%B").trimEnd(),
+    renderedCommitMessage("gpt-5.6-sol", "xhigh").trimEnd(),
+  );
+  assert.deepEqual(fs.readdirSync(messageDirectory), []);
+});
+
 test("omits model attribution when no reliable model source exists", (t) => {
   const repository = createRepository(t);
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "commit-commands-unavailable-"));
@@ -162,6 +279,7 @@ test("omits model attribution when no reliable model source exists", (t) => {
     CLAUDE_EFFORT: "xhigh",
     TMPDIR: toBashPath(messageDirectory),
   };
+  delete environment.ANTHROPIC_MODEL;
   delete environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE;
 
   const result = run("bash", [wrapper], {

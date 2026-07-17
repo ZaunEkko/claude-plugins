@@ -238,11 +238,15 @@ export function resolveSessionEffort({
 
 export function resolveSessionModel({
   stateFile,
+  requireStateFile = false,
   expectedStateDirectory = stateDirectory(),
   environment = process.env,
   settingsPath = defaultSettingsPath(environment),
   settingsModel,
 } = {}) {
+  if (requireStateFile && (typeof stateFile !== "string" || stateFile.length === 0)) {
+    throw new TypeError("an explicit session state file is required");
+  }
   const diagnostics = {};
   const environmentModel = validateModelId(environment.ANTHROPIC_MODEL);
   const configuredModel = validateModelId(settingsModel) || readSettingsModel(settingsPath);
@@ -253,11 +257,14 @@ export function resolveSessionModel({
     diagnostics.settingsModel = { id: configuredModel, confidence: "low" };
   }
 
-  const candidateStateFiles = [
-    stateFile,
-    environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE,
-    stateFileFromSessionEnvironment(environment, expectedStateDirectory),
-  ].filter((candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index);
+  const candidateStateFiles = (requireStateFile
+    ? [stateFile]
+    : [
+        stateFile,
+        environment.CLAUDE_COMMIT_COMMANDS_STATE_FILE,
+        stateFileFromSessionEnvironment(environment, expectedStateDirectory),
+      ])
+    .filter((candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index);
 
   let state = null;
   for (const candidateStateFile of candidateStateFiles) {
@@ -265,6 +272,9 @@ export function resolveSessionModel({
     if (state) {
       break;
     }
+  }
+  if (requireStateFile && !state) {
+    throw new Error("explicit session state file is unavailable or invalid");
   }
 
   const transcriptModel = state?.transcriptPath
@@ -286,6 +296,15 @@ export function resolveSessionModel({
       display: formatModelId(state.model),
       source: "session-start",
       confidence: "medium",
+      diagnostics,
+    };
+  }
+  if (environmentModel) {
+    return {
+      id: environmentModel,
+      display: formatModelId(environmentModel),
+      source: "environment",
+      confidence: "low",
       diagnostics,
     };
   }

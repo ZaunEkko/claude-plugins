@@ -1,7 +1,7 @@
 {
   "name": "commit-commands",
-  "version": "2.0.2",
-  "description": "Third-party compatibility distribution modified from Anthropic's official commit-commands plugin with compact dynamic model attribution, a Claude Code direct-commit guard, and deterministic, confirmation-gated cleanup of gone branches and worktrees.",
+  "version": "2.0.3",
+  "description": "Third-party compatibility distribution modified from Anthropic's official commit-commands plugin with compact dynamic model attribution, Claude Code Bash and Playwright unsafe-process commit guards, explicit detached-session binding, and deterministic, confirmation-gated cleanup of gone branches and worktrees.",
   "author": {
     "name": "ZaunEkko",
     "url": "https://github.com/ZaunEkko"

@@ -2,15 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 2.0.3 - 2026-07-17
 
 ### Added
 
 - Added a `PreToolUse` Bash guard that blocks direct `git commit` and `git.exe commit` calls inside Claude Code, including common Git global-option forms such as `git -C <path> commit`, so commits cannot bypass dynamic attribution.
+- Extended the guard to known Playwright `browser_run_code_unsafe` tool names, blocking observable local-process commit creation and attribution-wrapper execution while leaving normal browser automation and explicit no-commit Git preparation paths available.
+- Added `--claude-state-file <path>` to the attribution wrapper for strict detached-session binding; invalid explicit state fails before Git and never falls through to another concurrent session.
 
 ### Fixed
 
 - Restored the canonical `claude.ai/code` commit attribution, dynamic current-model/effort rendering, and the requested blank separator when Claude supplies an alternate generated marker, omits `Model:`, or produces no attribution block.
+- Changed detached model fallback order to prefer `ANTHROPIC_MODEL` over a low-information settings alias such as `opus` when transcript and SessionStart state are unavailable.
 
 ## 0.2.0 - 2026-07-14
 
