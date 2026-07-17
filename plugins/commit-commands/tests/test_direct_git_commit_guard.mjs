@@ -6,7 +6,10 @@ import test from "node:test";
 
 import {
   DIRECT_COMMIT_REASON,
+  PLAYWRIGHT_COMMIT_REASON,
+  containsCommitCreatingGitCommand,
   containsDirectGitCommit,
+  containsPlaywrightCommitExecution,
   evaluateHookInput,
 } from "../scripts/deny-direct-git-commit.mjs";
 
@@ -19,6 +22,14 @@ function hookInput(command) {
     hook_event_name: "PreToolUse",
     tool_name: "Bash",
     tool_input: { command },
+  };
+}
+
+function playwrightHookInput(code) {
+  return {
+    hook_event_name: "PreToolUse",
+    tool_name: "mcp__plugin_playwright_playwright__browser_run_code_unsafe",
+    tool_input: { code },
   };
 }
 
@@ -118,6 +129,110 @@ for (const command of allowedCommands) {
   });
 }
 
+test("classifies Git commands that can create commits in unsafe process contexts", () => {
+  for (const command of [
+    "git commit -m message",
+    "git merge --no-ff feature/topic",
+    "git cherry-pick abc123",
+    "git revert abc123",
+    "git rebase main",
+    "git am patch.mbox",
+    "git pull origin main",
+    "git commit-tree HEAD^{tree}",
+  ]) {
+    assert.equal(containsCommitCreatingGitCommand(command), true, command);
+  }
+  for (const command of [
+    "git status",
+    "git merge --no-commit --no-ff feature/topic",
+    "git merge --ff-only feature/topic",
+    "git merge --squash feature/topic",
+    "git pull --ff-only origin main",
+    "git pull --no-commit origin main",
+    "git cherry-pick --no-commit abc123",
+    "git revert -n abc123",
+  ]) {
+    assert.equal(containsCommitCreatingGitCommand(command), false, command);
+  }
+});
+
+const blockedPlaywrightCode = [
+  `async () => {
+    const { execFile } = require("node:child_process");
+    execFile("git", ["commit", "-m", "message"]);
+  }`,
+  `async () => {
+    const { exec } = require("child_process");
+    exec("git -C repository commit -m message");
+  }`,
+  `async () => {
+    const { spawn } = require("node:child_process");
+    spawn("git", ["merge", "--no-ff", "feature/topic"]);
+  }`,
+  `async () => {
+    const childProcess = require("node:child_process");
+    childProcess.execFile("git", ["cherry-pick", "abc123"]);
+  }`,
+  `async () => {
+    const path = require("node:path");
+    const { execFile } = require("node:child_process");
+    execFile("bash", [path.join(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "commit-with-dynamic-attribution.sh")]);
+  }`,
+  `async () => {
+    const path = require("node:path");
+    const { execFile } = require("node:child_process");
+    execFile("git", ["merge", "--no-ff", "--no-commit", "feature/topic"]);
+    execFile("C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe", [
+      path.join(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "commit-with-dynamic-attribution.sh"),
+    ]);
+  }`,
+  `async () => {
+    const { execFile } = require("node:child_process");
+    execFile("git", ["merge", "--no-ff", "feature/first"]);
+    execFile("git", ["merge", "--no-commit", "feature/second"]);
+  }`,
+];
+
+for (const code of blockedPlaywrightCode) {
+  test("blocks commit creation through Playwright unsafe process execution", () => {
+    assert.equal(containsPlaywrightCommitExecution(code), true);
+  });
+}
+
+const allowedPlaywrightCode = [
+  `async (page) => page.getByText("git commit documentation").click()`,
+  `async () => {
+    const { execFile } = require("node:child_process");
+    execFile("git", ["status", "--short"]);
+  }`,
+  `async () => {
+    const { execFile } = require("node:child_process");
+    execFile("git", ["merge", "--no-commit", "--no-ff", "feature/topic"]);
+  }`,
+  `async () => {
+    const { spawn } = require("node:child_process");
+    spawn("git", ["merge", "--ff-only", "feature/topic"]);
+  }`,
+  `async () => {
+    const { spawn } = require("node:child_process");
+    spawn("git", ["merge", "--squash", "feature/topic"]);
+  }`,
+  `async () => {
+    const { execFile } = require("node:child_process");
+    execFile("git", ["pull", "--ff-only", "origin", "main"]);
+  }`,
+  `async (page) => {
+    // require("node:child_process").exec("git commit -m ignored");
+    return page.title();
+  }`,
+];
+
+for (const code of allowedPlaywrightCode) {
+  test("allows Playwright code that cannot create a Git commit", () => {
+    assert.equal(containsPlaywrightCommitExecution(code), false);
+  });
+}
+
 test("returns the structured PreToolUse deny decision", () => {
   assert.deepEqual(evaluateHookInput(hookInput("git -C repository commit -m message")), {
     hookSpecificOutput: {
@@ -128,8 +243,20 @@ test("returns the structured PreToolUse deny decision", () => {
   });
 });
 
-test("returns no decision for allowed Bash commands and other hook events", () => {
+test("returns the Playwright-specific deny decision", () => {
+  const input = playwrightHookInput(blockedPlaywrightCode[0]);
+  assert.deepEqual(evaluateHookInput(input), {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: PLAYWRIGHT_COMMIT_REASON,
+    },
+  });
+});
+
+test("returns no decision for allowed calls and other hook events", () => {
   assert.equal(evaluateHookInput(hookInput("git status")), null);
+  assert.equal(evaluateHookInput(playwrightHookInput(allowedPlaywrightCode[0])), null);
   assert.equal(evaluateHookInput({ ...hookInput("git commit"), tool_name: "Read" }), null);
   assert.equal(evaluateHookInput({ ...hookInput("git commit"), hook_event_name: "PostToolUse" }), null);
 });
@@ -139,6 +266,14 @@ test("CLI writes only the structured deny JSON and exits successfully", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
   assert.deepEqual(JSON.parse(result.stdout), evaluateHookInput(hookInput("git commit -m message")));
+});
+
+test("CLI denies Playwright unsafe commit execution", () => {
+  const input = playwrightHookInput(blockedPlaywrightCode.at(-1));
+  const result = runGuard(input);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), evaluateHookInput(input));
 });
 
 test("CLI stays silent for an allowed Git command", () => {
@@ -158,13 +293,21 @@ test("CLI fails closed with exit 2 for malformed hook input", () => {
   assert.equal(missingCommand.status, 2);
   assert.equal(missingCommand.stdout, "");
   assert.match(missingCommand.stderr, /tool_input\.command/u);
+
+  const missingCode = runGuard({
+    hook_event_name: "PreToolUse",
+    tool_name: "mcp__plugin_playwright_playwright__browser_run_code_unsafe",
+  });
+  assert.equal(missingCode.status, 2);
+  assert.equal(missingCode.stdout, "");
+  assert.match(missingCode.stderr, /tool_input\.code/u);
 });
 
-test("hooks.json runs one guard for every Bash call", () => {
+test("hooks.json runs one guard for Bash and Playwright unsafe calls", () => {
   const configuration = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
   const groups = configuration.hooks.PreToolUse;
   assert.equal(groups.length, 1);
-  assert.equal(groups[0].matcher, "Bash");
+  assert.equal(groups[0].matcher, "Bash|mcp__.*playwright.*__browser_run_code_unsafe");
   assert.deepEqual(groups[0].hooks, [
     {
       args: ["${CLAUDE_PLUGIN_ROOT}/scripts/deny-direct-git-commit.mjs"],

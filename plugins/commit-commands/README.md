@@ -2,7 +2,7 @@
 
 `commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official [`commit-commands`](https://github.com/anthropics/claude-plugins-public/tree/main/plugins/commit-commands) plugin.
 
-It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its enhancements are deterministic replacement of the commit-attribution `Model:` line with the current Claude Code model plus optional effort, a `PreToolUse` guard that prevents direct Git commits from bypassing the attribution wrapper inside Claude Code, and confirmation-gated cleanup of gone branches/worktrees without forced worktree removal.
+It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its enhancements are deterministic replacement of the commit-attribution `Model:` line with the current Claude Code model plus optional effort, a `PreToolUse` guard that blocks direct Bash commits and known Playwright unsafe-process commit paths, explicit detached-session state binding, and confirmation-gated cleanup of gone branches/worktrees without forced worktree removal.
 
 This distribution is maintained by ZaunEkko, not Anthropic.
 
@@ -42,17 +42,20 @@ All three command names are preserved. The commit commands route creation throug
 
 ## Direct commit guard
 
-A plugin `PreToolUse` hook examines each Claude Code `Bash` call and returns immediately unless the command could contain a Git commit. For candidate commands, a deterministic Node guard identifies the Git executable after common shell prefixes and wrappers, skips Git global options such as `-C`, `-c`, `--git-dir`, and `--work-tree`, follows common shell command strings and command substitutions, and denies the call when the resolved Git subcommand is exactly `commit`.
+A plugin `PreToolUse` hook examines each Claude Code `Bash` call and each known Playwright `browser_run_code_unsafe` tool name. Bash calls use the deterministic shell parser: it identifies the Git executable after common prefixes and wrappers, skips Git global options such as `-C`, `-c`, `--git-dir`, and `--work-tree`, follows common shell command strings and command substitutions, and denies the call when the resolved Git subcommand is exactly `commit`.
 
-The denial instructs Claude Code to use `/commit-commands:commit`, `/commit-commands:commit-push-pr`, or the attribution wrapper. The wrapper itself remains allowed because its top-level tool call is the wrapper script rather than a direct Git invocation; the wrapper's child `git commit -F` process does not create another Claude Code `PreToolUse` event.
+For Playwright unsafe code, the guard first requires an observable local-process API such as Node.js `child_process`, then inspects JavaScript string arguments. It denies direct `git commit`, commit-producing porcelain such as merge/cherry-pick/rebase without a no-commit mode, and any invocation of `commit-with-dynamic-attribution.sh`. Read-only Git calls and merge/cherry-pick/revert with an explicit no-commit mode remain allowed.
 
-The guard is intentionally limited to Claude Code tool calls:
+The denial instructs Claude Code to use `/commit-commands:commit`, `/commit-commands:commit-push-pr`, or the attribution wrapper through Claude Code Bash. The Bash wrapper itself remains allowed because its top-level tool call is the wrapper script rather than a direct Git invocation; the wrapper's child `git commit -F` process does not create another Claude Code `PreToolUse` event.
+
+The guard is intentionally limited to Claude Code tool calls and statically observable execution paths:
 
 - it does not install repository or global Git hooks;
 - it does not affect commits created manually from a terminal, IDE, GUI, or CI;
 - non-commit Git commands such as `status`, `diff`, `log`, and `push` remain allowed;
+- normal Playwright browser operations are unaffected; only the unsafe local-process code entry point is inspected;
 - malformed hook input fails closed with hook exit status 2, while normal denials use the structured `PreToolUse` JSON response;
-- it is a workflow guard rail, not a complete shell sandbox against deliberately indirect execution.
+- it is a workflow guard rail, not a complete shell, JavaScript, or arbitrary third-party MCP sandbox.
 
 ## Safe gone-branch cleanup
 
@@ -80,7 +83,7 @@ Claude Code still generates the complete commit message, including its configure
 
 1. writes the complete message from stdin to a private temporary file;
 2. resolves the current model from the latest valid assistant record in the current transcript;
-3. falls back to the optional SessionStart model, then the user's configured default model;
+3. falls back to the optional SessionStart model, then `ANTHROPIC_MODEL`, then the user's configured default model;
 4. resolves effort from `CLAUDE_EFFORT`, then the user's configured `effort`/`effortLevel`;
 5. writes `Model: <model> [effort]` after a blank separator line, removes legacy standalone `Effort:` attribution, or removes `Model:` when no reliable model exists;
 6. runs `git commit -F <temporary-file>` only when rendering succeeds;
@@ -103,7 +106,7 @@ Behavioral boundaries:
 - If the attribution marker exists without a `Model:` line, the wrapper inserts the dynamically resolved model and effort. If the commit message has no attribution marker, it appends the complete canonical attribution block. When no reliable model exists, it does not invent a static value.
 - When a target `Model:` line exists, the renderer ensures the final attribution marker is followed by a blank line without duplicating an existing separator.
 - A `Model:` line in the commit body before the final Claude Code attribution marker is not modified.
-- If transcript and SessionStart do not provide a valid model, the plugin uses the user's configured default `model` with low confidence.
+- If transcript and SessionStart do not provide a valid model, the plugin uses `ANTHROPIC_MODEL` before the user's configured default `model`; both are low-confidence fallbacks.
 - If none of those sources provides a valid model, the attribution `Model:` line is removed rather than writing `unknown` or retaining a stale value.
 - Standard Claude IDs are formatted generically, such as `claude-opus-4-8` → `Claude Opus 4.8`.
 - Unknown provider IDs are kept as supplied after single-line safety validation.
@@ -114,7 +117,9 @@ Behavioral boundaries:
 
 ## Session state and privacy
 
-A SessionStart hook creates a per-session state file in a private directory under the operating-system temporary directory. When Claude Code exposes `CLAUDE_ENV_FILE`, the hook also exports the exact state path for later Bash calls. If that export is unavailable, the resolver deterministically derives the same SHA-256 state filename from `CLAUDE_CODE_SESSION_ID`. The state contains only:
+A SessionStart hook creates a per-session state file in a private directory under the operating-system temporary directory. When Claude Code exposes `CLAUDE_ENV_FILE`, the hook also exports the exact state path for later Bash calls. If that export is unavailable, the resolver deterministically derives the same SHA-256 state filename from `CLAUDE_CODE_SESSION_ID`. A deliberately detached caller can pass `--claude-state-file <exact-path>` to the wrapper; that explicit path is validated inside the private state directory and used exclusively, so an invalid path fails before Git and cannot fall through to another concurrent session. The plugin never selects the newest state file globally.
+
+The state contains only:
 
 - the transcript path;
 - the optional SessionStart model;
@@ -122,7 +127,7 @@ A SessionStart hook creates a per-session state file in a private directory unde
 
 It does not copy prompts or transcript content. A SessionEnd hook removes the current state, and SessionStart removes stale state files older than seven days.
 
-The resolver reads transcript JSONL from the end and only extracts the latest valid `message.model` from a top-level assistant record. The user's configured settings `model` is used only after transcript and SessionStart resolution fail. `ANTHROPIC_MODEL` remains diagnostic-only and never determines the commit attribution.
+The resolver reads transcript JSONL from the end and only extracts the latest valid `message.model` from a top-level assistant record. Resolution order is transcript, SessionStart model, `ANTHROPIC_MODEL`, configured settings `model`, then unavailable. `ANTHROPIC_MODEL` is intentionally preferred over a settings alias such as `opus` when session state is unavailable because it preserves the concrete provider model exposed to the detached process.
 
 Effort is not present as a dedicated field in the observed transcript schema. The plugin therefore uses the active `CLAUDE_EFFORT` value first, then the configured `effort` or `effortLevel`, and appends it to the `Model:` value when available.
 
@@ -191,7 +196,7 @@ Run the isolated automated suite:
 node --test plugins/commit-commands/tests/*.mjs
 ```
 
-The tests cover direct-commit guard parsing and structured hook denial, safe gone-branch discovery and confirmation, exact refs, paths with spaces/Unicode, dirty/locked/current worktree skips, preservation witnesses, digest mismatches, mutation failures, session isolation, transcript and settings fallback, unavailable-model omission, compact effort formatting, malformed JSONL tails, LF/CRLF byte preservation, renderer failure, temporary-file cleanup, existing pre-commit hook rejection, and the complete `commit-push-pr` order. Remote fixtures use local bare repositories and stubbed tools; tests never contact a real remote or GitHub.
+The tests cover direct-commit guard parsing and structured hook denial, Playwright unsafe-process commit and wrapper detection, safe no-commit preparation paths, explicit detached-session binding without cross-session fallback, safe gone-branch discovery and confirmation, exact refs, paths with spaces/Unicode, dirty/locked/current worktree skips, preservation witnesses, digest mismatches, mutation failures, session isolation, transcript/SessionStart/`ANTHROPIC_MODEL`/settings fallback, unavailable-model omission, compact effort formatting, malformed JSONL tails, LF/CRLF byte preservation, renderer failure, temporary-file cleanup, existing pre-commit hook rejection, and the complete `commit-push-pr` order. Remote fixtures use local bare repositories and stubbed tools; tests never contact a real remote or GitHub.
 
 Validate the plugin and marketplace:
 

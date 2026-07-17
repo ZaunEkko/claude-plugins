@@ -56,7 +56,7 @@ This file is byte-for-byte identical to the synchronized upstream file.
   - carries an in-file modification notice.
 - `README.md`
   - rewritten for the third-party compatibility distribution;
-  - documents the dynamic attribution behavior, direct-commit `PreToolUse` guard, conflict policy, runtime, tests, provenance, and license.
+  - documents dynamic attribution, Bash and Playwright unsafe-process `PreToolUse` guards, explicit detached-session state binding, conflict policy, runtime, tests, provenance, and license.
 
 ## Files added by this distribution
 
