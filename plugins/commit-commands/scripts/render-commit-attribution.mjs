@@ -276,7 +276,11 @@ function atomicReplace(filePath, buffer, mode) {
 export function renderCommitFile(
   messageFile,
   {
-    resolution = resolveSessionModel(),
+    stateFile,
+    resolution = resolveSessionModel({
+      stateFile,
+      requireStateFile: typeof stateFile === "string",
+    }),
     effortResolution = resolveSessionEffort(),
     writeFile = true,
   } = {},
@@ -294,12 +298,43 @@ export function renderCommitFile(
   return { ...rendered, resolution, effortResolution };
 }
 
-function main() {
-  const messageFile = process.argv[2];
+function parseArguments(arguments_) {
+  const messageFile = arguments_[0];
   if (!messageFile) {
-    throw new Error("usage: render-commit-attribution.mjs <message-file>");
+    throw new Error(
+      "usage: render-commit-attribution.mjs <message-file> [--state-file <path>]",
+    );
   }
-  renderCommitFile(messageFile);
+
+  let stateFile;
+  for (let index = 1; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === "--state-file") {
+      if (stateFile !== undefined || index + 1 >= arguments_.length) {
+        throw new Error("--state-file requires exactly one path");
+      }
+      stateFile = arguments_[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--state-file=")) {
+      if (stateFile !== undefined) {
+        throw new Error("--state-file may only be provided once");
+      }
+      stateFile = argument.slice("--state-file=".length);
+      continue;
+    }
+    throw new Error(`unknown renderer argument: ${argument}`);
+  }
+  if (stateFile !== undefined && stateFile.length === 0) {
+    throw new Error("--state-file requires a non-empty path");
+  }
+  return { messageFile, stateFile };
+}
+
+function main() {
+  const { messageFile, stateFile } = parseArguments(process.argv.slice(2));
+  renderCommitFile(messageFile, { stateFile });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

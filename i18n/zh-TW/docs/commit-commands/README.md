@@ -2,7 +2,7 @@
 
 [简体中文](../../../../docs/commit-commands/README.md) · [English](../../../en/docs/commit-commands/README.md) · [繁體中文](README.md) · [日本語](../../../ja/docs/commit-commands/README.md) · [한국어](../../../ko/docs/commit-commands/README.md)
 
-`commit-commands@zaunekko` 是 Anthropic 官方同名外掛的第三方相容分發。它保留安裝名稱、命令命名空間與 Git 工作流程，把 commit attribution 的 `Model:` 更新為目前 Claude Code 工作階段模型與可用 effort，並阻止 Claude Code 直接執行原生 `git commit` 來繞過 attribution wrapper。
+`commit-commands@zaunekko` 是 Anthropic 官方同名外掛的第三方相容分發。它保留安裝名稱、命令命名空間與 Git 工作流程，把 commit attribution 的 `Model:` 更新為目前 Claude Code 工作階段模型與可用 effort，並阻止 Claude Code Bash 與已知 Playwright unsafe 本機程序路徑繞過 attribution wrapper。
 
 本分發由 ZaunEkko 維護，並非 Anthropic 官方發布。
 
@@ -35,9 +35,9 @@ Claude Code 已將自訂 commands 統一為 skills 語意；本外掛保留 `com
 
 ## 防止直接 commit 繞過 wrapper
 
-`PreToolUse` Bash guard 會在 Claude Code 執行前拒絕直接的 `git commit`、`git.exe commit`，以及 `git -C <路徑> commit` 等常見 Git 全域參數形式。請改用 `/commit-commands:commit`、`/commit-commands:commit-push-pr` 或外掛 attribution wrapper。
+確定性的 `PreToolUse` guard 會拒絕 Bash 中直接的 `git commit`、`git.exe commit`，以及 `git -C <路徑> commit` 等常見 Git 全域參數形式。對已知 Playwright `browser_run_code_unsafe` 工具名稱，它會檢查可靜態觀察的本機程序呼叫，並阻止直接 commit、未明確使用 no-commit 模式的提交型 Git porcelain，以及 attribution wrapper 執行。請改用 `/commit-commands:commit`、`/commit-commands:commit-push-pr`，或透過 Claude Code Bash 呼叫 wrapper。
 
-此 guard 只作用於 Claude Code 的 Bash 工具呼叫，不會安裝本機或全域 Git hooks，也不影響終端、IDE、Git GUI 或 CI 的 commit。`status`、`diff`、`log`、`push` 等非 commit Git 命令與 wrapper 的頂層呼叫仍可正常執行。
+一般瀏覽器自動化、唯讀 Git 命令與明確的 `--no-commit`/`-n`/`--ff-only` 準備流程仍可使用。此 guard 不安裝 Git hooks，也不影響終端、IDE、Git GUI 或 CI；它是工作流程護欄，不是完整的 shell、JavaScript 或任意第三方 MCP sandbox。
 
 ## 安全清理 gone 分支
 
@@ -70,7 +70,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 Renderer 會處理最後一個 Claude Code marker 後的 attribution，確保一行空白分隔但不重複，移除舊的獨立 `Effort:`，並保留 LF/CRLF 與非目標位元組。若 Claude 先產生另一種 attribution marker，wrapper 會在渲染前恢復為設定的 `Generated with [Claude Code](https://claude.ai/code)`。缺少 `Model:` 時會插入動態解析結果；完全沒有 marker 時會追加完整標準 attribution。無可靠模型時不會虛構靜態值。
 
-模型來源依序為目前 transcript 最新有效 assistant `message.model`、SessionStart model、設定的預設 `model`，最後才省略。Effort 依序取 `CLAUDE_EFFORT`、設定的 `effort`/`effortLevel`，不可用時只寫模型。這些值只作為單行資料驗證，不會當成 shell 程式碼執行。
+模型來源依序為目前 transcript 最新有效 assistant `message.model`、SessionStart model、目前程序的 `ANTHROPIC_MODEL`、設定的預設 `model`，最後才省略。一般 Bash 呼叫透過匯出的 pointer 或 `CLAUDE_CODE_SESSION_ID` 定位目前 state；明確脫離工作階段的呼叫方可在 Git 參數前傳入 `--claude-state-file <精確路徑>`。Wrapper 只會使用該私有 state 檔，路徑無效時在 Git 前失敗，也不會藉由選擇最新 state 猜測並行工作階段。Effort 依序取 `CLAUDE_EFFORT`、設定的 `effort`/`effortLevel`，不可用時只寫模型。這些值只作為單行資料驗證，不會當成 shell 程式碼執行。
 
 ## Fail-closed 行為
 

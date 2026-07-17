@@ -1,9 +1,9 @@
 {
-  "description": "Prevents direct Git commits from bypassing dynamic attribution and captures per-session model metadata.",
+  "description": "Prevents Claude Code Bash and Playwright unsafe process execution from bypassing dynamic commit attribution, and captures per-session model metadata.",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|mcp__.*playwright.*__browser_run_code_unsafe",
         "hooks": [
           {
             "type": "command",

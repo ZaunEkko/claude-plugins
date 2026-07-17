@@ -6,6 +6,10 @@ import { pathToFileURL } from "node:url";
 export const DIRECT_COMMIT_REASON =
   "Direct git commit is blocked by commit-commands. Use /commit-commands:commit, "
   + "/commit-commands:commit-push-pr, or the plugin attribution wrapper.";
+export const PLAYWRIGHT_COMMIT_REASON =
+  "Git commit creation through Playwright browser_run_code_unsafe is blocked by commit-commands. "
+  + "Use /commit-commands:commit, /commit-commands:commit-push-pr, or invoke the attribution "
+  + "wrapper through Claude Code Bash so the current session state is preserved.";
 
 const COMMAND_SEPARATORS = new Set([";", "|", "&", "(", ")", "{", "}"]);
 const GIT_EXECUTABLES = new Set(["git", "git.exe"]);
@@ -38,6 +42,144 @@ const GIT_TERMINAL_OPTIONS = new Set([
   "--man-path",
   "--version",
 ]);
+const PLAYWRIGHT_UNSAFE_TOOL_PATTERN = /^mcp__.*playwright.*__browser_run_code_unsafe$/u;
+const LOCAL_PROCESS_FUNCTIONS = new Set([
+  "command",
+  "exec",
+  "execfile",
+  "execfilesync",
+  "execsync",
+  "fork",
+  "spawn",
+  "spawnsync",
+]);
+const LOCAL_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
+const JAVASCRIPT_SIMPLE_ESCAPES = new Map([
+  ["b", "\b"],
+  ["f", "\f"],
+  ["n", "\n"],
+  ["r", "\r"],
+  ["t", "\t"],
+  ["v", "\v"],
+]);
+const ALWAYS_COMMITTING_GIT_SUBCOMMANDS = new Set([
+  "am",
+  "commit",
+  "commit-tree",
+  "rebase",
+]);
+const CONDITIONAL_COMMITTING_GIT_SUBCOMMANDS = new Set([
+  "cherry-pick",
+  "merge",
+  "pull",
+  "revert",
+]);
+
+function decodeJavaScriptEscape(source, index) {
+  const character = source[index];
+  if (JAVASCRIPT_SIMPLE_ESCAPES.has(character)) {
+    return { end: index, value: JAVASCRIPT_SIMPLE_ESCAPES.get(character) };
+  }
+  if (character === "\n") {
+    return { end: index, value: "" };
+  }
+  if (character === "\r") {
+    return { end: source[index + 1] === "\n" ? index + 1 : index, value: "" };
+  }
+  if (character === "x") {
+    const digits = source.slice(index + 1, index + 3);
+    if (/^[0-9a-f]{2}$/iu.test(digits)) {
+      return { end: index + 2, value: String.fromCodePoint(Number.parseInt(digits, 16)) };
+    }
+  }
+  if (character === "u") {
+    if (source[index + 1] === "{") {
+      const closingBrace = source.indexOf("}", index + 2);
+      const digits = closingBrace < 0 ? "" : source.slice(index + 2, closingBrace);
+      if (/^[0-9a-f]{1,6}$/iu.test(digits)) {
+        const codePoint = Number.parseInt(digits, 16);
+        if (codePoint <= 0x10ffff) {
+          return { end: closingBrace, value: String.fromCodePoint(codePoint) };
+        }
+      }
+    } else {
+      const digits = source.slice(index + 1, index + 5);
+      if (/^[0-9a-f]{4}$/iu.test(digits)) {
+        return { end: index + 4, value: String.fromCodePoint(Number.parseInt(digits, 16)) };
+      }
+    }
+  }
+  return { end: index, value: character };
+}
+
+function readJavaScriptString(source, startIndex, delimiter) {
+  let value = "";
+  for (let index = startIndex + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === delimiter) {
+      return { end: index, value };
+    }
+    if (character === "\\") {
+      if (index + 1 >= source.length) {
+        throw new Error("Playwright code ends with an incomplete JavaScript escape");
+      }
+      const decoded = decodeJavaScriptEscape(source, index + 1);
+      value += decoded.value;
+      index = decoded.end;
+      continue;
+    }
+    if (delimiter !== "`" && (character === "\n" || character === "\r")) {
+      throw new Error("Playwright code contains an unterminated JavaScript string");
+    }
+    value += character;
+  }
+  throw new Error("Playwright code contains an unterminated JavaScript string");
+}
+
+function scanJavaScript(code) {
+  if (typeof code !== "string") {
+    throw new TypeError("Playwright code must be a string");
+  }
+  if (code.length === 0) {
+    throw new RangeError("Playwright code must not be empty");
+  }
+
+  const identifiers = [];
+  const strings = [];
+  for (let index = 0; index < code.length; index += 1) {
+    const character = code[index];
+    if (character === "/" && code[index + 1] === "/") {
+      while (index + 1 < code.length && !["\n", "\r"].includes(code[index + 1])) {
+        index += 1;
+      }
+      continue;
+    }
+    if (character === "/" && code[index + 1] === "*") {
+      const end = code.indexOf("*/", index + 2);
+      if (end < 0) {
+        throw new Error("Playwright code contains an unterminated block comment");
+      }
+      index = end + 1;
+      continue;
+    }
+    if (["'", "\"", "`"].includes(character)) {
+      const parsed = readJavaScriptString(code, index, character);
+      strings.push(parsed.value);
+      index = parsed.end;
+      continue;
+    }
+    if (!/[A-Za-z_$]/u.test(character)) {
+      continue;
+    }
+    let end = index + 1;
+    while (end < code.length && /[A-Za-z0-9_$]/u.test(code[end])) {
+      end += 1;
+    }
+    identifiers.push(code.slice(index, end));
+    index = end - 1;
+  }
+  return { identifiers, strings };
+}
 
 function tokenizeShellSegments(command) {
   if (typeof command !== "string") {
@@ -389,6 +531,118 @@ function gitSubcommand(words, startIndex) {
   }
 
   return index < words.length ? words[index] : null;
+}
+
+function gitSubcommandCreatesCommit(subcommand, argumentsAfterExecutable) {
+  if (ALWAYS_COMMITTING_GIT_SUBCOMMANDS.has(subcommand)) {
+    return true;
+  }
+  if (!CONDITIONAL_COMMITTING_GIT_SUBCOMMANDS.has(subcommand)) {
+    return false;
+  }
+  if (argumentsAfterExecutable.includes("--no-commit") || argumentsAfterExecutable.includes("-n")) {
+    return false;
+  }
+  if (subcommand === "merge") {
+    return !argumentsAfterExecutable.includes("--ff-only")
+      && !argumentsAfterExecutable.includes("--squash");
+  }
+  if (subcommand === "pull") {
+    return !argumentsAfterExecutable.includes("--ff-only");
+  }
+  return true;
+}
+
+function gitCommandCreatesCommit(words, executableIndex) {
+  const subcommand = gitSubcommand(words, executableIndex + 1)?.toLowerCase();
+  if (!subcommand) {
+    return false;
+  }
+  const argumentsAfterExecutable = words
+    .slice(executableIndex + 1)
+    .map((word) => word.toLowerCase());
+  return gitSubcommandCreatesCommit(subcommand, argumentsAfterExecutable);
+}
+
+function isGitExecutableValue(value) {
+  return typeof value === "string" && GIT_EXECUTABLES.has(executableName(value.trim()));
+}
+
+function stringSequenceCreatesCommit(strings) {
+  for (let index = 0; index < strings.length; index += 1) {
+    if (!isGitExecutableValue(strings[index])) {
+      continue;
+    }
+    let end = Math.min(strings.length, index + 33);
+    for (let cursor = index + 1; cursor < end; cursor += 1) {
+      if (isGitExecutableValue(strings[cursor])) {
+        end = cursor;
+        break;
+      }
+    }
+    const argumentsAfterExecutable = strings
+      .slice(index + 1, end)
+      .map((value) => value.trim());
+    const words = [strings[index], ...argumentsAfterExecutable];
+    if (gitCommandCreatesCommit(words, 0)) {
+      return true;
+    }
+
+    const normalizedArguments = argumentsAfterExecutable.map((value) => value.toLowerCase());
+    const subcommand = normalizedArguments.find((value) =>
+      ALWAYS_COMMITTING_GIT_SUBCOMMANDS.has(value)
+      || CONDITIONAL_COMMITTING_GIT_SUBCOMMANDS.has(value));
+    if (subcommand && gitSubcommandCreatesCommit(subcommand, normalizedArguments)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasAttributionWrapperReference(strings) {
+  return strings.some((value) => {
+    const normalized = value.replaceAll("\\", "/").toLowerCase();
+    return normalized === "commit-with-dynamic-attribution.sh"
+      || normalized.endsWith("/commit-with-dynamic-attribution.sh");
+  });
+}
+
+export function containsPlaywrightCommitExecution(code) {
+  const { identifiers, strings } = scanJavaScript(code);
+  const normalizedIdentifiers = new Set(identifiers.map((identifier) => identifier.toLowerCase()));
+  const hasProcessFunction = [...normalizedIdentifiers].some((identifier) =>
+    LOCAL_PROCESS_FUNCTIONS.has(identifier));
+  const hasProcessModule = strings.some((value) =>
+    LOCAL_PROCESS_MODULES.has(value.toLowerCase()))
+    || normalizedIdentifiers.has("bun")
+    || normalizedIdentifiers.has("deno");
+  if (!hasProcessFunction || !hasProcessModule) {
+    return false;
+  }
+  if (hasAttributionWrapperReference(strings) || stringSequenceCreatesCommit(strings)) {
+    return true;
+  }
+
+  for (const value of strings) {
+    const normalized = value.toLowerCase();
+    if (
+      !normalized.includes("git")
+      || ![
+        ...ALWAYS_COMMITTING_GIT_SUBCOMMANDS,
+        ...CONDITIONAL_COMMITTING_GIT_SUBCOMMANDS,
+      ].some((subcommand) => normalized.includes(subcommand))
+    ) {
+      continue;
+    }
+    try {
+      if (containsCommitCreatingGitCommand(value)) {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 function hereDocumentDeclarations(line, state) {
@@ -817,24 +1071,27 @@ function shellCommandArgument(words, executableIndex) {
   return null;
 }
 
-function containsDirectGitCommitAtDepth(command, depth) {
+function containsGitCommandAtDepth(command, depth, requiredSubcommands, predicate) {
   if (depth > 8) {
     throw new Error("Bash command nesting exceeds the guard limit");
   }
   const { expandableBodies, visibleCommand } = analyzeHereDocuments(command);
   const normalizedCommand = [visibleCommand, ...expandableBodies].join("\n").toLowerCase();
-  if (!normalizedCommand.includes("git") || !normalizedCommand.includes("commit")) {
+  if (
+    !normalizedCommand.includes("git")
+    || !requiredSubcommands.some((subcommand) => normalizedCommand.includes(subcommand))
+  ) {
     return false;
   }
 
   for (const nestedCommand of commandSubstitutions(visibleCommand)) {
-    if (containsDirectGitCommitAtDepth(nestedCommand, depth + 1)) {
+    if (containsGitCommandAtDepth(nestedCommand, depth + 1, requiredSubcommands, predicate)) {
       return true;
     }
   }
   for (const body of expandableBodies) {
     for (const nestedCommand of commandSubstitutions(body, { hereDocument: true })) {
-      if (containsDirectGitCommitAtDepth(nestedCommand, depth + 1)) {
+      if (containsGitCommandAtDepth(nestedCommand, depth + 1, requiredSubcommands, predicate)) {
         return true;
       }
     }
@@ -849,56 +1106,91 @@ function containsDirectGitCommitAtDepth(command, depth) {
     const executable = executableName(words[executableIndex]);
     if (SHELL_EXECUTABLES.has(executable)) {
       const nestedCommand = shellCommandArgument(words, executableIndex);
-      if (nestedCommand && containsDirectGitCommitAtDepth(nestedCommand, depth + 1)) {
+      if (
+        nestedCommand
+        && containsGitCommandAtDepth(nestedCommand, depth + 1, requiredSubcommands, predicate)
+      ) {
         return true;
       }
       continue;
     }
     if (executable === "eval") {
       const nestedCommand = words.slice(executableIndex + 1).join(" ");
-      if (nestedCommand && containsDirectGitCommitAtDepth(nestedCommand, depth + 1)) {
+      if (
+        nestedCommand
+        && containsGitCommandAtDepth(nestedCommand, depth + 1, requiredSubcommands, predicate)
+      ) {
         return true;
       }
       continue;
     }
-    if (!GIT_EXECUTABLES.has(executable)) {
-      continue;
-    }
-    if (gitSubcommand(words, executableIndex + 1)?.toLowerCase() === "commit") {
+    if (GIT_EXECUTABLES.has(executable) && predicate(words, executableIndex)) {
       return true;
     }
   }
   return false;
 }
 
+function isDirectGitCommit(words, executableIndex) {
+  return gitSubcommand(words, executableIndex + 1)?.toLowerCase() === "commit";
+}
+
 export function containsDirectGitCommit(command) {
   if (typeof command !== "string") {
     throw new TypeError("Bash command must be a string");
   }
-  return containsDirectGitCommitAtDepth(command, 0);
+  return containsGitCommandAtDepth(command, 0, ["commit"], isDirectGitCommit);
+}
+
+export function containsCommitCreatingGitCommand(command) {
+  if (typeof command !== "string") {
+    throw new TypeError("Bash command must be a string");
+  }
+  return containsGitCommandAtDepth(
+    command,
+    0,
+    [
+      ...ALWAYS_COMMITTING_GIT_SUBCOMMANDS,
+      ...CONDITIONAL_COMMITTING_GIT_SUBCOMMANDS,
+    ],
+    gitCommandCreatesCommit,
+  );
+}
+
+function deny(reason) {
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  };
 }
 
 export function evaluateHookInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new TypeError("hook input must be a JSON object");
   }
-  if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Bash") {
+  if (input.hook_event_name !== "PreToolUse") {
     return null;
   }
-  const command = input.tool_input?.command;
-  if (typeof command !== "string") {
-    throw new TypeError("PreToolUse Bash input must include tool_input.command");
+  if (input.tool_name === "Bash") {
+    const command = input.tool_input?.command;
+    if (typeof command !== "string") {
+      throw new TypeError("PreToolUse Bash input must include tool_input.command");
+    }
+    return containsDirectGitCommit(command) ? deny(DIRECT_COMMIT_REASON) : null;
   }
-  if (!containsDirectGitCommit(command)) {
-    return null;
+  if (PLAYWRIGHT_UNSAFE_TOOL_PATTERN.test(input.tool_name ?? "")) {
+    const code = input.tool_input?.code;
+    if (typeof code !== "string") {
+      throw new TypeError(
+        "PreToolUse Playwright browser_run_code_unsafe input must include tool_input.code",
+      );
+    }
+    return containsPlaywrightCommitExecution(code) ? deny(PLAYWRIGHT_COMMIT_REASON) : null;
   }
-  return {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: DIRECT_COMMIT_REASON,
-    },
-  };
+  return null;
 }
 
 async function readStandardInput() {

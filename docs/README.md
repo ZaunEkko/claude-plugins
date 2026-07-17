@@ -6,7 +6,7 @@
 
 - [安装与更新](getting-started.md)：添加市场、选择作用域、安装、更新与重新加载插件。
 - [故障排查](troubleshooting.md)：诊断市场、作用域、命名空间、hooks 与平台问题。
-- [`commit-commands` 使用指南](commit-commands/README.md)：安装兼容分发、运行三个命令、理解动态 attribution 与 Claude Code 直接 commit 防绕过保护。
+- [`commit-commands` 使用指南](commit-commands/README.md)：安装兼容分发、运行三个命令、理解动态 attribution、Bash/Playwright unsafe 提交防绕过保护与显式 detached session 绑定。
 
 ## 插件作者指南
 

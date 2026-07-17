@@ -9,7 +9,7 @@
     {
       "name": "commit-commands",
       "source": "./plugins/commit-commands",
-      "description": "A third-party compatibility distribution of Anthropic's commit-commands plugin with compact dynamic current-model attribution, optional effort metadata, and a PreToolUse guard that blocks direct Git commits inside Claude Code. Enable it instead of, not alongside, the official distribution.",
+      "description": "A third-party compatibility distribution of Anthropic's commit-commands plugin with compact dynamic current-model attribution, optional effort metadata, explicit detached-session binding, and a PreToolUse guard for direct Bash and known Playwright unsafe-process commit paths. Enable it instead of, not alongside, the official distribution.",
       "author": {
         "name": "ZaunEkko",
         "url": "https://github.com/ZaunEkko"

@@ -2,7 +2,7 @@
 
 [简体中文](../../../../docs/commit-commands/README.md) · [English](README.md) · [繁體中文](../../../zh-TW/docs/commit-commands/README.md) · [日本語](../../../ja/docs/commit-commands/README.md) · [한국어](../../../ko/docs/commit-commands/README.md)
 
-`commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official plugin of the same name. It preserves the install identity, command namespace, and Git workflow while updating the commit attribution `Model:` line with the current Claude Code session model and optional effort, and it prevents direct `git commit` calls inside Claude Code from bypassing the attribution wrapper.
+`commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official plugin of the same name. It preserves the install identity, command namespace, and Git workflow while updating the commit attribution `Model:` line with the current Claude Code session model and optional effort, and it blocks direct Bash and known Playwright unsafe-process commit paths from bypassing the attribution wrapper.
 
 This distribution is maintained by ZaunEkko and is not an Anthropic release.
 
@@ -35,9 +35,9 @@ Claude Code now treats custom commands as skills, but this plugin keeps its `com
 
 ## Prevent direct commits from bypassing the wrapper
 
-A `PreToolUse` Bash guard rejects direct `git commit`, `git.exe commit`, and common global-option forms such as `git -C <path> commit` before Claude Code runs them. Use `/commit-commands:commit`, `/commit-commands:commit-push-pr`, or the plugin attribution wrapper instead.
+A deterministic `PreToolUse` guard rejects direct `git commit`, `git.exe commit`, and common global-option forms such as `git -C <path> commit` in Bash. For known Playwright `browser_run_code_unsafe` tool names, it inspects statically observable local-process calls and blocks direct commits, commit-producing Git porcelain without an explicit no-commit mode, and attribution-wrapper execution. Use `/commit-commands:commit`, `/commit-commands:commit-push-pr`, or invoke the wrapper through Claude Code Bash instead.
 
-The guard applies only to Claude Code Bash tool calls. It installs no local or global Git hooks, does not affect commits from terminals, IDEs, Git GUIs, or CI, and allows non-commit Git commands such as `status`, `diff`, `log`, and `push`. The wrapper's top-level invocation remains allowed.
+Normal browser automation, read-only Git commands, and explicit `--no-commit`/`-n`/`--ff-only` preparation remain available. The guard installs no Git hooks, does not affect terminals, IDEs, Git GUIs, or CI, and is a workflow guard rail rather than a complete shell, JavaScript, or arbitrary third-party MCP sandbox.
 
 ## Safely clean gone branches
 
@@ -74,8 +74,11 @@ Model resolution order:
 
 1. Latest valid assistant `message.model` in the current transcript.
 2. Model captured at SessionStart.
-3. Configured default `model`.
-4. Omit the attribution model line.
+3. Current-process `ANTHROPIC_MODEL`.
+4. Configured default `model`.
+5. Omit the attribution model line.
+
+Normal Bash calls locate the current state through the exported pointer or `CLAUDE_CODE_SESSION_ID`. A deliberately detached caller may pass `--claude-state-file <exact-path>` before Git arguments; the wrapper validates and exclusively uses that private state file, fails before Git when it is invalid, and never guesses by selecting the newest concurrent state.
 
 Effort resolution order:
 
