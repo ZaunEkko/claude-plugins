@@ -81,8 +81,8 @@ jobs:
             claude plugin validate "${plugin_source}" --strict
           done < "${RUNNER_TEMP}/active-plugin-sources.txt"
 
-  clean-gone-cross-platform:
-    name: clean-gone (${{ matrix.os }})
+  commit-commands-cross-platform:
+    name: commit-commands (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -105,5 +105,5 @@ jobs:
         shell: bash
         run: test "$(node --version)" = "v${NODE_VERSION}"
 
-      - name: Run cleanup integration tests
-        run: node --test plugins/commit-commands/tests/test_clean_gone.mjs
+      - name: Run cross-platform commit-commands tests
+        run: node --test plugins/commit-commands/tests/test_clean_gone.mjs plugins/commit-commands/tests/test_direct_git_commit_guard.mjs
