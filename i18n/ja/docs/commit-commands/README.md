@@ -2,7 +2,7 @@
 
 [简体中文](../../../../docs/commit-commands/README.md) · [English](../../../en/docs/commit-commands/README.md) · [繁體中文](../../../zh-TW/docs/commit-commands/README.md) · [日本語](README.md) · [한국어](../../../ko/docs/commit-commands/README.md)
 
-`commit-commands@zaunekko` は Anthropic 公式同名プラグインから派生した第三者互換配布です。インストール名、コマンド名前空間、Git ワークフローを維持し、commit attribution の `Model:` を現在の Claude Code セッションモデルと任意の effort に更新します。
+`commit-commands@zaunekko` は Anthropic 公式同名プラグインから派生した第三者互換配布です。インストール名、コマンド名前空間、Git ワークフローを維持し、commit attribution の `Model:` を現在の Claude Code セッションモデルと任意の effort に更新するとともに、Claude Code 内の直接的な `git commit` が attribution wrapper を迂回することを防ぎます。
 
 ZaunEkko が管理する配布であり、Anthropic 公式リリースではありません。
 
@@ -32,6 +32,12 @@ claude plugin enable commit-commands@zaunekko --scope user
 | `/commit-commands:clean_gone` | plan と明示的な確認の後、正確な `refs/remotes/...` upstream が存在せず、commit が他の ref で保持されているローカルブランチと clean な worktree を安全に削除。 |
 
 Claude Code はカスタム commands を skills として扱いますが、公式インターフェース維持のため `commands/` レイアウトを保持します。
+
+## wrapper を迂回する直接 commit の防止
+
+`PreToolUse` Bash guard は、Claude Code が実行する前に、直接の `git commit`、`git.exe commit`、および `git -C <パス> commit` など一般的な Git グローバルオプション形式を拒否します。代わりに `/commit-commands:commit`、`/commit-commands:commit-push-pr`、またはプラグインの attribution wrapper を使用してください。
+
+この guard は Claude Code の Bash ツール呼び出しだけに作用します。ローカルまたはグローバル Git hook はインストールせず、ターミナル、IDE、Git GUI、CI からの commit には影響しません。`status`、`diff`、`log`、`push` など commit 以外の Git コマンドと wrapper のトップレベル呼び出しは引き続き許可されます。
 
 ## gone ブランチの安全なクリーンアップ
 
@@ -70,7 +76,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 Wrapper は private temporary message を作成し、attribution を atomic に更新し、render 成功後のみ `git commit -F` を実行します。Git hook failure をそのまま返し、成功・失敗・中断後に一時ファイルを削除します。commit 失敗後の push、push 失敗後の PR 作成は行いません。
 
-自動 SessionStart/SessionEnd hooks と shell wrapper を含みます。インストール前に [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json) と [`scripts/`](../../../../plugins/commit-commands/scripts/) を確認してください。
+自動 `PreToolUse`、SessionStart、SessionEnd hooks と shell wrapper を含みます。インストール前に [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json) と [`scripts/`](../../../../plugins/commit-commands/scripts/) を確認してください。
 
 ## 要件と更新
 

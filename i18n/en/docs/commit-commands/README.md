@@ -2,7 +2,7 @@
 
 [简体中文](../../../../docs/commit-commands/README.md) · [English](README.md) · [繁體中文](../../../zh-TW/docs/commit-commands/README.md) · [日本語](../../../ja/docs/commit-commands/README.md) · [한국어](../../../ko/docs/commit-commands/README.md)
 
-`commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official plugin of the same name. It preserves the install identity, command namespace, and Git workflow while updating the commit attribution `Model:` line with the current Claude Code session model and optional effort.
+`commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official plugin of the same name. It preserves the install identity, command namespace, and Git workflow while updating the commit attribution `Model:` line with the current Claude Code session model and optional effort, and it prevents direct `git commit` calls inside Claude Code from bypassing the attribution wrapper.
 
 This distribution is maintained by ZaunEkko and is not an Anthropic release.
 
@@ -32,6 +32,12 @@ Then run `/reload-plugins` in the current session. Use `local` scope for local t
 | `/commit-commands:clean_gone` | After planning and explicit confirmation, safely remove local branches whose exact `refs/remotes/...` upstream is missing, plus clean worktrees, only when their commits remain preserved by other refs. |
 
 Claude Code now treats custom commands as skills, but this plugin keeps its `commands/` layout to preserve the official interface.
+
+## Prevent direct commits from bypassing the wrapper
+
+A `PreToolUse` Bash guard rejects direct `git commit`, `git.exe commit`, and common global-option forms such as `git -C <path> commit` before Claude Code runs them. Use `/commit-commands:commit`, `/commit-commands:commit-push-pr`, or the plugin attribution wrapper instead.
+
+The guard applies only to Claude Code Bash tool calls. It installs no local or global Git hooks, does not affect commits from terminals, IDEs, Git GUIs, or CI, and allows non-commit Git commands such as `status`, `diff`, `log`, and `push`. The wrapper's top-level invocation remains allowed.
 
 ## Safely clean gone branches
 
@@ -83,7 +89,7 @@ Model and effort values are validated as single-line data and are never evaluate
 
 The wrapper writes a private temporary message, renders attribution atomically, calls `git commit -F` only after rendering succeeds, propagates Git hook failures, removes temporary files after success/failure/interruption, and prevents `commit-push-pr` from pushing after a failed commit or creating a PR after a failed push.
 
-The plugin contains automatic SessionStart/SessionEnd hooks and a shell wrapper. Inspect [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json) and [`scripts/`](../../../../plugins/commit-commands/scripts/) before installing.
+The plugin contains automatic `PreToolUse`, SessionStart, and SessionEnd hooks plus a shell wrapper. Inspect [`hooks/hooks.json`](../../../../plugins/commit-commands/hooks/hooks.json) and [`scripts/`](../../../../plugins/commit-commands/scripts/) before installing.
 
 ## Requirements
 

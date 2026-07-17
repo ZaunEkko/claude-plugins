@@ -2,7 +2,7 @@
 
 `commit-commands@zaunekko` is a third-party compatibility distribution derived from Anthropic's official [`commit-commands`](https://github.com/anthropics/claude-plugins-public/tree/main/plugins/commit-commands) plugin.
 
-It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its enhancements are deterministic replacement of the commit-attribution `Model:` line with the current Claude Code model plus optional effort, and confirmation-gated cleanup of gone branches/worktrees without forced worktree removal.
+It keeps the same plugin name, command namespace, command descriptions, and Git workflows. Its enhancements are deterministic replacement of the commit-attribution `Model:` line with the current Claude Code model plus optional effort, a `PreToolUse` guard that prevents direct Git commits from bypassing the attribution wrapper inside Claude Code, and confirmation-gated cleanup of gone branches/worktrees without forced worktree removal.
 
 This distribution is maintained by ZaunEkko, not Anthropic.
 
@@ -39,6 +39,20 @@ The plugin preserves all three official commands:
 | `/commit-commands:clean_gone` | Plan deterministic cleanup, request explicit confirmation, then remove only safe branches with an exact missing `refs/remotes/...` upstream and eligible clean worktrees. |
 
 All three command names are preserved. The commit commands route creation through the shared attribution wrapper, while `clean_gone.md` delegates cleanup to a deterministic planner/executor instead of parsing human-readable Git output.
+
+## Direct commit guard
+
+A plugin `PreToolUse` hook examines each Claude Code `Bash` call and returns immediately unless the command could contain a Git commit. For candidate commands, a deterministic Node guard identifies the Git executable after common shell prefixes and wrappers, skips Git global options such as `-C`, `-c`, `--git-dir`, and `--work-tree`, follows common shell command strings and command substitutions, and denies the call when the resolved Git subcommand is exactly `commit`.
+
+The denial instructs Claude Code to use `/commit-commands:commit`, `/commit-commands:commit-push-pr`, or the attribution wrapper. The wrapper itself remains allowed because its top-level tool call is the wrapper script rather than a direct Git invocation; the wrapper's child `git commit -F` process does not create another Claude Code `PreToolUse` event.
+
+The guard is intentionally limited to Claude Code tool calls:
+
+- it does not install repository or global Git hooks;
+- it does not affect commits created manually from a terminal, IDE, GUI, or CI;
+- non-commit Git commands such as `status`, `diff`, `log`, and `push` remain allowed;
+- malformed hook input fails closed with hook exit status 2, while normal denials use the structured `PreToolUse` JSON response;
+- it is a workflow guard rail, not a complete shell sandbox against deliberately indirect execution.
 
 ## Safe gone-branch cleanup
 
@@ -177,7 +191,7 @@ Run the isolated automated suite:
 node --test plugins/commit-commands/tests/*.mjs
 ```
 
-The tests cover safe gone-branch discovery and confirmation, exact refs, paths with spaces/Unicode, dirty/locked/current worktree skips, preservation witnesses, digest mismatches, mutation failures, session isolation, transcript and settings fallback, unavailable-model omission, compact effort formatting, malformed JSONL tails, LF/CRLF byte preservation, renderer failure, temporary-file cleanup, existing pre-commit hook rejection, and the complete `commit-push-pr` order. Remote fixtures use local bare repositories and stubbed tools; tests never contact a real remote or GitHub.
+The tests cover direct-commit guard parsing and structured hook denial, safe gone-branch discovery and confirmation, exact refs, paths with spaces/Unicode, dirty/locked/current worktree skips, preservation witnesses, digest mismatches, mutation failures, session isolation, transcript and settings fallback, unavailable-model omission, compact effort formatting, malformed JSONL tails, LF/CRLF byte preservation, renderer failure, temporary-file cleanup, existing pre-commit hook rejection, and the complete `commit-push-pr` order. Remote fixtures use local bare repositories and stubbed tools; tests never contact a real remote or GitHub.
 
 Validate the plugin and marketplace:
 

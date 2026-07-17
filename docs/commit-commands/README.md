@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [English](../../i18n/en/docs/commit-commands/README.md) · [繁體中文](../../i18n/zh-TW/docs/commit-commands/README.md) · [日本語](../../i18n/ja/docs/commit-commands/README.md) · [한국어](../../i18n/ko/docs/commit-commands/README.md)
 
-`commit-commands@zaunekko` 是 Anthropic 官方同名插件的第三方兼容分发。它保留原有安装名、命令命名空间和 Git 工作流，并把 commit attribution 中的 `Model:` 更新为当前 Claude Code 会话模型，可选附加当前或配置的 effort。
+`commit-commands@zaunekko` 是 Anthropic 官方同名插件的第三方兼容分发。它保留原有安装名、命令命名空间和 Git 工作流，把 commit attribution 中的 `Model:` 更新为当前 Claude Code 会话模型，可选附加当前或配置的 effort，并阻止 Claude Code 直接执行原生 `git commit` 绕过 attribution wrapper。
 
 本分发由 ZaunEkko 维护，不代表 Anthropic 官方发布。
 
@@ -38,6 +38,16 @@ claude plugin enable commit-commands@zaunekko --scope user
 | `/commit-commands:clean_gone` | 规划并确认后，安全清理远端跟踪引用已消失且提交仍由其他引用保留的本地分支与干净 worktree。 |
 
 Claude Code 现在把自定义 commands 统一为 skills 语义，但本插件保留 `commands/` 布局以兼容官方接口。
+
+## 防止 Claude Code 绕过 commit wrapper
+
+插件注册了 `PreToolUse` Bash guard。当 Claude Code 尝试直接运行 `git commit`、`git.exe commit`，或 `git -C <路径> commit` 等带常见 Git 全局参数的直接提交命令时，工具调用会在执行前被拒绝，并提示改用：
+
+- `/commit-commands:commit`；
+- `/commit-commands:commit-push-pr`；
+- 插件的动态 attribution wrapper。
+
+该保护只作用于 Claude Code 的 Bash 工具调用，不安装本地或全局 Git hooks，也不会影响终端、IDE、Git GUI 或 CI 中的人工提交。`git status`、`git diff`、`git log`、`git push` 等非 commit 命令不受影响。插件 wrapper 的顶层调用也不会被拦截。
 
 ## 安全清理 gone 分支
 
@@ -118,7 +128,7 @@ commit wrapper 采用 fail-closed 顺序：
 5. 成功、失败或中断后清理临时文件；
 6. `commit-push-pr` 不会在 commit 失败后 push，也不会在 push 失败后创建 PR。
 
-插件包含自动运行的 SessionStart/SessionEnd hooks 和 shell wrapper。安装前请检查 [`hooks/hooks.json`](../../plugins/commit-commands/hooks/hooks.json) 与 [`scripts/`](../../plugins/commit-commands/scripts/)。
+插件包含自动运行的 `PreToolUse`、SessionStart、SessionEnd hooks 和 shell wrapper。安装前请检查 [`hooks/hooks.json`](../../plugins/commit-commands/hooks/hooks.json) 与 [`scripts/`](../../plugins/commit-commands/scripts/)。
 
 ## 依赖与平台
 

@@ -40,7 +40,7 @@
 
 | 插件 | 状态 | 说明 | 文档 |
 |---|---|---|---|
-| `commit-commands` | 可用 · 兼容分发 | 基于 Anthropic 官方同名插件，保留三个命令，并提供当前会话模型 attribution 与确认式安全分支/worktree 清理。 | [使用指南](docs/commit-commands/README.md) · [实现与上游说明](plugins/commit-commands/README.md) |
+| `commit-commands` | 可用 · 兼容分发 | 基于 Anthropic 官方同名插件，保留三个命令，提供当前会话模型 attribution、Claude Code 直接 commit 防绕过保护，以及确认式安全分支/worktree 清理。 | [使用指南](docs/commit-commands/README.md) · [实现与上游说明](plugins/commit-commands/README.md) |
 
 `commit-commands` 与官方分发暴露相同命名空间。请在同一作用域内只启用一个版本。
 

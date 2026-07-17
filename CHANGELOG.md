@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Added a `PreToolUse` Bash guard that blocks direct `git commit` and `git.exe commit` calls inside Claude Code, including common Git global-option forms such as `git -C <path> commit`, so commits cannot bypass dynamic attribution.
+
 ### Fixed
 
 - Restored the canonical `claude.ai/code` commit attribution, dynamic current-model/effort rendering, and the requested blank separator when Claude supplies an alternate generated marker, omits `Model:`, or produces no attribution block.

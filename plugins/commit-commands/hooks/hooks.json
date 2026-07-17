@@ -1,6 +1,21 @@
 {
-  "description": "Captures per-session model metadata for dynamic Git commit attribution.",
+  "description": "Prevents direct Git commits from bypassing dynamic attribution and captures per-session model metadata.",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/deny-direct-git-commit.mjs"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

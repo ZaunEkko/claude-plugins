@@ -37,7 +37,7 @@ This file is byte-for-byte identical to the synchronized upstream file.
 - `.claude-plugin/plugin.json`
   - identifies ZaunEkko as the third-party maintainer;
   - adds version, repository, license, and discovery metadata;
-  - prominently describes the compact dynamic model attribution and optional effort metadata modification.
+  - prominently describes the compact dynamic model attribution, optional effort metadata, and Claude Code direct-commit guard modifications.
 - `commands/clean_gone.md`
   - preserves the official command name and missing-remote cleanup purpose;
   - replaces locale-dependent, regex-based Git output parsing and forced deletion with a deterministic plugin script;
@@ -56,7 +56,7 @@ This file is byte-for-byte identical to the synchronized upstream file.
   - carries an in-file modification notice.
 - `README.md`
   - rewritten for the third-party compatibility distribution;
-  - documents the dynamic attribution behavior, conflict policy, runtime, tests, provenance, and license.
+  - documents the dynamic attribution behavior, direct-commit `PreToolUse` guard, conflict policy, runtime, tests, provenance, and license.
 
 ## Files added by this distribution
 
@@ -64,6 +64,7 @@ This file is byte-for-byte identical to the synchronized upstream file.
 - `UPSTREAM.md`
 - `hooks/hooks.json`
 - `scripts/capture-session-model.mjs`
+- `scripts/deny-direct-git-commit.mjs`
 - `scripts/resolve-session-model.mjs`
 - `scripts/render-commit-attribution.mjs`
 - `scripts/commit-with-dynamic-attribution.sh`
@@ -74,6 +75,7 @@ This file is byte-for-byte identical to the synchronized upstream file.
 - `tests/test_resolve_session_model.mjs`
 - `tests/test_render_commit_attribution.mjs`
 - `tests/test_commit_wrapper.mjs`
+- `tests/test_direct_git_commit_guard.mjs`
 
 All files in this plugin directory are distributed under the directory's Apache License 2.0.
 

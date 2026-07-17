@@ -36,7 +36,7 @@ Original plugins normally use the purpose-first name `ekko-<specific-purpose>`. 
 
 | Plugin | Status | Description | Documentation |
 |---|---|---|---|
-| `commit-commands` | Available · compatibility distribution | Preserves the three official command names and writes the current session model plus optional effort into Git commit attribution. | [User guide](docs/commit-commands/README.md) · [Implementation and upstream notes](../../plugins/commit-commands/README.md) |
+| `commit-commands` | Available · compatibility distribution | Preserves the three official command names, writes the current session model plus optional effort into Git commit attribution, and blocks direct commits from bypassing the wrapper inside Claude Code. | [User guide](docs/commit-commands/README.md) · [Implementation and upstream notes](../../plugins/commit-commands/README.md) |
 
 `commit-commands` exposes the same namespace as the official distribution. Enable exactly one version in any given scope.
 
