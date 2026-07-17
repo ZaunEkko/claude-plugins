@@ -17,12 +17,8 @@ const wrapper = path.join(pluginRoot, "scripts", "commit-with-dynamic-attributio
 const commandFile = path.join(pluginRoot, "commands", "commit-push-pr.md");
 const marker = "Generated with [Claude Code](https://claude.ai/code)";
 
-function run(command, args, options = {}) {
-  return spawnSync(command, args, { encoding: "utf8", ...options });
-}
-
 function git(repository, ...args) {
-  const result = run("git", args, { cwd: repository });
+  const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result.stdout.trim();
 }
@@ -85,8 +81,9 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
     TMPDIR: toBashPath(messages),
   };
 
-  const commit = run("bash", [wrapper], {
+  const commit = spawnSync("bash", [wrapper], {
     cwd: repository,
+    encoding: "utf8",
     env: environment,
     input: `test: commit push pr flow\n\n${marker}\nModel: stale\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`,
   });
@@ -112,11 +109,19 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
     { mode: 0o755 },
   );
   fs.chmodSync(ghStub, 0o755);
-  const gh = run("bash", ["-c", "gh pr create --title 'Fixture PR' --body 'Local-only verification'"], {
+  const gh = spawnSync("bash", [
+    ghStub,
+    "pr",
+    "create",
+    "--title",
+    "Fixture PR",
+    "--body",
+    "Local-only verification",
+  ], {
     cwd: repository,
+    encoding: "utf8",
     env: {
       ...environment,
-      PATH: `${toBashPath(bin)}:${process.env.PATH}`,
       GH_LOG: toBashPath(ghLog),
     },
   });
