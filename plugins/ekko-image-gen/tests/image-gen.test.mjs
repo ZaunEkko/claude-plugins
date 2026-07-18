@@ -494,6 +494,100 @@ test("falls back through the configured model priority after an upstream model f
   assert.deepEqual(result.jobs[0].modelAttempts.map((attempt) => attempt.status), ["error", "ok"]);
 });
 
+test("falls back on explicit model client errors", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const seenModels = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenModels.push(body.model);
+    if (body.model === "primary-model") {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "model_not_found", message: "The requested model does not exist" },
+      }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "client-model-fallback",
+    prompt: "Use the available model",
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["primary-model", "fallback-model"],
+      model: undefined,
+      maxRetries: 0,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.deepEqual(seenModels, ["primary-model", "fallback-model"]);
+  assert.equal(result.jobs[0].model, "fallback-model");
+  assert.equal(result.jobs[0].fallbackUsed, true);
+});
+
+test("does not fall back on policy or parameter errors that mention a model", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const seenRequests = [];
+  const failures = new Map([
+    ["policy", {
+      status: 400,
+      code: "content_policy_violation",
+      message: "The model is unavailable for this content under the content policy",
+    }],
+    ["size", {
+      status: 422,
+      code: "invalid_size",
+      message: "The model is unsupported for the requested size",
+    }],
+  ]);
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenRequests.push({ prompt: body.prompt, model: body.model });
+    const failure = failures.get(body.prompt);
+    if (body.model === "primary-model" && failure) {
+      response.writeHead(failure.status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: failure.code, message: failure.message },
+      }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    concurrency: 1,
+    jobs: [
+      { id: "policy-error", prompt: "policy", outputDir: path.join(directory, "output") },
+      { id: "size-error", prompt: "size", outputDir: path.join(directory, "output") },
+    ],
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["primary-model", "fallback-model"],
+      model: undefined,
+      maxRetries: 0,
+    }),
+  });
+
+  assert.equal(result.status, "error");
+  assert.deepEqual(seenRequests, [
+    { prompt: "policy", model: "primary-model" },
+    { prompt: "size", model: "primary-model" },
+  ]);
+  assert.deepEqual(result.jobs.map((job) => job.error.code), [
+    "content_policy_violation",
+    "invalid_size",
+  ]);
+  assert.deepEqual(
+    result.jobs.map((job) => job.error.details.modelAttempts.length),
+    [1, 1],
+  );
+});
+
 test("keeps successful paths when another job fails and redacts the API key", async (t) => {
   const directory = await temporaryDirectory(t);
   const baseUrl = await startServer(t, async (request, response) => {

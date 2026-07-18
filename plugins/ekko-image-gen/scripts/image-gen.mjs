@@ -42,6 +42,28 @@ const DEFAULT_CONFIG = Object.freeze({
 
 const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const MODEL_FALLBACK_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const MODEL_FALLBACK_CLIENT_STATUSES = new Set([400, 404, 422]);
+const MODEL_FALLBACK_CODES = new Set([
+  "deployment_not_available",
+  "deployment_not_found",
+  "deployment_unavailable",
+  "invalid_model",
+  "model_not_available",
+  "model_not_found",
+  "model_not_supported",
+  "model_unavailable",
+  "unknown_model",
+  "unsupported_model",
+]);
+const NON_MODEL_FALLBACK_CODE_PATTERN =
+  /(?:auth|api_?key|permission|content|policy|safety|moderation|invalid_(?:image|size|prompt|dimensions?|quality|count|input))/iu;
+const NON_MODEL_FALLBACK_MESSAGE_PATTERN =
+  /\b(?:content(?: policy)?|safety|moderation|size|dimensions?|quality|prompt|input|parameters?|format|resolution)\b/iu;
+const MODEL_FALLBACK_MESSAGE_PATTERNS = Object.freeze([
+  /\b(?:invalid|unknown|unsupported|unavailable)\s+(?:image\s+)?model\b/iu,
+  /\b(?:model|deployment)\b.{0,120}\b(?:not found|cannot be found|does not exist|not available|unavailable|not supported|unsupported|unknown)\b/iu,
+  /\bno such\s+(?:model|deployment)\b/iu,
+]);
 const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high"]);
 
 class ImageGenError extends Error {
@@ -711,13 +733,35 @@ function redact(value, apiKey) {
   return apiKey ? text.split(apiKey).join("[REDACTED]") : text;
 }
 
+function normalizeErrorCode(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+}
+
 function shouldFallbackModel(error) {
   if (MODEL_FALLBACK_STATUSES.has(error.status)) {
     return true;
   }
-  const text = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
-  return new Set([400, 404, 422]).has(error.status) &&
-    /model|unsupported|not found|not available|unavailable|unknown/iu.test(text);
+  if (!MODEL_FALLBACK_CLIENT_STATUSES.has(error.status)) {
+    return false;
+  }
+
+  const code = normalizeErrorCode(error.code);
+  if (NON_MODEL_FALLBACK_CODE_PATTERN.test(code)) {
+    return false;
+  }
+  if (MODEL_FALLBACK_CODES.has(code)) {
+    return true;
+  }
+
+  const message = String(error.message ?? "");
+  if (NON_MODEL_FALLBACK_MESSAGE_PATTERN.test(message)) {
+    return false;
+  }
+  return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 async function parseResponse(response) {

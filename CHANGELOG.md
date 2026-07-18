@@ -15,10 +15,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Bumped `ekko-image-gen` to `0.1.6` so user-scope version-cached installations receive multi-image auto-adaptation, the standard GPT Image request shape, streamed size and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, correct environment model precedence, and public marketplace documentation.
+- Bumped `ekko-image-gen` to `0.1.7` so user-scope version-cached installations receive multi-image auto-adaptation, the standard GPT Image request shape, streamed size and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, precise model-fallback classification, correct environment model precedence, and public marketplace documentation.
 
 ### Fixed
 
+- Limited 400/404/422 model fallback to explicit model error codes or strict model-unavailability wording, so content-policy and ordinary parameter errors are not resubmitted to later models.
 - Kept request timeouts active until JSON or image response bodies finish streaming, so a server cannot hold a global slot indefinitely after sending headers.
 - Rejected non-loopback plain HTTP API endpoints before any bearer key, prompt, or reference image can be transmitted.
 - Rejected base64 and URL output payloads whose bytes are not a supported image format instead of writing mislabeled PNG files.
