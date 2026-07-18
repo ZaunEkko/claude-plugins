@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = Object.freeze({
   queueTimeoutMs: 600000,
   maxRetries: 1,
   maxInputBytes: 25 * 1024 * 1024,
+  maxOutputBytes: 50 * 1024 * 1024,
 });
 
 const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -234,6 +235,7 @@ function mergeEnvironment(fileConfig, env) {
     queueTimeoutMs: env.EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS ?? fileConfig.queueTimeoutMs,
     maxRetries: env.EKKO_IMAGE_GEN_MAX_RETRIES ?? fileConfig.maxRetries,
     maxInputBytes: env.EKKO_IMAGE_GEN_MAX_INPUT_BYTES ?? fileConfig.maxInputBytes,
+    maxOutputBytes: env.EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES ?? fileConfig.maxOutputBytes,
     runtimeDir: env.EKKO_IMAGE_GEN_RUNTIME_DIR ?? fileConfig.runtimeDir,
   };
 }
@@ -298,6 +300,13 @@ export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
       100 * 1024 * 1024,
       "maxInputBytes",
     ),
+    maxOutputBytes: boundedInteger(
+      raw.maxOutputBytes,
+      DEFAULT_CONFIG.maxOutputBytes,
+      1024,
+      200 * 1024 * 1024,
+      "maxOutputBytes",
+    ),
     runtimeDir: path.resolve(
       nonEmptyString(raw.runtimeDir) ?? path.join(homeDir, ".claude", "ekko-image-gen", "runtime"),
     ),
@@ -335,9 +344,22 @@ export function sanitizeBaseName(value, fallback = "generated-image") {
   return normalized || fallback;
 }
 
+function normalizeImageValues(value) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
 function normalizeImageSource(value) {
   if (typeof value === "string") {
-    return { source: value, name: null };
+    const source = nonEmptyString(value);
+    if (!source) {
+      throw new ImageGenError("Image reference strings must not be empty", {
+        code: "invalid_request",
+      });
+    }
+    return { source, name: null };
   }
   if (!value || typeof value !== "object") {
     throw new ImageGenError("Each image reference must be a path, URL, or image object", {
@@ -399,10 +421,10 @@ function normalizeJob(raw, index, config, cwd) {
     outputName = nonEmptyString(raw.outputName) ?? id;
   }
 
-  const images = [...(Array.isArray(raw.images) ? raw.images : [])];
-  if (Array.isArray(raw.referenceImages)) {
-    images.push(...raw.referenceImages);
-  }
+  const images = [
+    ...normalizeImageValues(raw.images),
+    ...normalizeImageValues(raw.referenceImages),
+  ];
   if (images.length > 10) {
     throw new ImageGenError(`jobs[${index}] supports at most 10 reference images`, {
       code: "invalid_request",
@@ -898,6 +920,11 @@ async function responseItemBytes(item, config, fetchImpl) {
   if (nonEmptyString(item?.b64_json)) {
     const raw = item.b64_json.replace(/^data:[^;,]+;base64,/iu, "");
     const bytes = Buffer.from(raw, "base64");
+    if (bytes.length > config.maxOutputBytes) {
+      throw new ImageGenError("Generated image exceeds maxOutputBytes", {
+        code: "image_too_large",
+      });
+    }
     return validatedResponseImage(
       bytes,
       "Image service returned base64 data that is not a supported image",
@@ -916,7 +943,11 @@ async function responseItemBytes(item, config, fetchImpl) {
             status: response.status,
           });
         }
-        const bytes = Buffer.from(await response.arrayBuffer());
+        const bytes = await readResponseBytes(
+          response,
+          config.maxOutputBytes,
+          "Generated image exceeds maxOutputBytes",
+        );
         return validatedResponseImage(
           bytes,
           "Generated image URL returned data that is not a supported image",
@@ -1348,7 +1379,7 @@ export async function runJobs(payload, options = {}) {
 }
 
 function helpText() {
-  return `Usage: node image-gen.mjs [--request FILE]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR.\n`;
+  return `Usage: node image-gen.mjs [--request FILE]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR.\n`;
 }
 
 async function readStdin() {

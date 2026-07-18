@@ -114,6 +114,7 @@ test("loads user config and applies environment overrides", async (t) => {
     apiKey: "file-key",
     maxConcurrency: 2,
     maxImagesPerRequest: 2,
+    maxOutputBytes: 4096,
   }));
   const loaded = await loadConfig({
     configPath,
@@ -122,12 +123,14 @@ test("loads user config and applies environment overrides", async (t) => {
       EKKO_IMAGE_GEN_API_KEY: "environment-key",
       EKKO_IMAGE_GEN_QUALITY: "high",
       EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST: "1",
+      EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES: "2048",
     },
   });
   assert.equal(loaded.apiKey, "environment-key");
   assert.equal(loaded.quality, "high");
   assert.equal(loaded.maxConcurrency, 2);
   assert.equal(loaded.maxImagesPerRequest, 1);
+  assert.equal(loaded.maxOutputBytes, 2048);
   assert.deepEqual(loaded.models, ["gpt-image-2"]);
 });
 
@@ -172,12 +175,15 @@ test("uses public defaults when configuration contains only endpoint and key", a
   assert.equal(loaded.baseUrl, "https://images.example.test/v1");
   assert.deepEqual(loaded.models, ["gpt-image-2"]);
   assert.equal(loaded.maxImagesPerRequest, 4);
+  assert.equal(loaded.maxOutputBytes, 50 * 1024 * 1024);
 });
 
 test("normalizes a single job and preserves an explicit output target", () => {
   const normalized = normalizeRequest({
     id: "logo",
     prompt: "A logo",
+    images: "first-reference.png",
+    referenceImages: { source: "second-reference.png", name: "secondary" },
     output: "assets/generated/logo.png",
   }, config("http://localhost:3050/v1", path.resolve("runtime")), {
     cwd: path.resolve("project"),
@@ -185,6 +191,10 @@ test("normalizes a single job and preserves an explicit output target", () => {
   assert.equal(normalized.jobs.length, 1);
   assert.equal(normalized.jobs[0].outputName, "logo");
   assert.equal(normalized.jobs[0].outputDir, path.resolve("project/assets/generated"));
+  assert.deepEqual(normalized.jobs[0].images, [
+    { source: "first-reference.png", name: null },
+    { source: "second-reference.png", name: "secondary" },
+  ]);
   assert.equal(normalized.jobs[0].historyDisabled, null);
   assert.throws(
     () => normalizeRequest({ prompt: "A logo", historyDisabled: "yes" }, config("http://localhost:3050/v1", path.resolve("runtime"))),
@@ -332,6 +342,52 @@ test("rejects successful responses with non-image base64 or URL payloads", async
   ]);
 });
 
+test("bounds generated base64 and URL payloads with maxOutputBytes", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const oversizedBytes = Buffer.concat([PNG_BYTES, Buffer.alloc(2048)]);
+  const baseUrl = await startServer(t, async (request, response) => {
+    if (request.url === "/oversized.png") {
+      response.writeHead(200, { "Content-Type": "image/png" });
+      response.write(PNG_BYTES);
+      response.end(Buffer.alloc(2048));
+      return;
+    }
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    const data = body.prompt === "oversized-base64"
+      ? [{ b64_json: oversizedBytes.toString("base64") }]
+      : [{ url: `http://${request.headers.host}/oversized.png` }];
+    successResponse(response, { data });
+  });
+
+  const result = await runJobs({
+    concurrency: 2,
+    jobs: [
+      {
+        id: "oversized-base64",
+        prompt: "oversized-base64",
+        outputDir: path.join(directory, "base64-output"),
+      },
+      {
+        id: "oversized-url",
+        prompt: "oversized-url",
+        outputDir: path.join(directory, "url-output"),
+      },
+    ],
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxOutputBytes: 1024,
+    }),
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.summary.failed, 2);
+  assert.deepEqual(result.jobs.map((job) => job.error.code), [
+    "image_too_large",
+    "image_too_large",
+  ]);
+});
+
 test("reports files saved before a later response item fails", async (t) => {
   const directory = await temporaryDirectory(t);
   const outputDir = path.join(directory, "output");
@@ -385,7 +441,7 @@ test("reports files saved before a later response item fails", async (t) => {
   assert.match(result.jobs[0].warnings.join("\n"), /Saved 1 image.*item 2 failed/u);
 });
 
-test("uploads local reference images with multipart form data", async (t) => {
+test("uploads a scalar local reference with multipart form data", async (t) => {
   const directory = await temporaryDirectory(t);
   const referencePath = path.join(directory, "reference.png");
   await fs.writeFile(referencePath, PNG_BYTES);
@@ -401,7 +457,7 @@ test("uploads local reference images with multipart form data", async (t) => {
   const result = await runJobs({
     id: "edited-icon",
     prompt: "Turn it red",
-    images: [referencePath],
+    images: referencePath,
     outputDir: path.join(directory, "output"),
   }, {
     cwd: directory,
@@ -678,7 +734,7 @@ test("keeps successful paths when another job fails and redacts the API key", as
   assert.match(result.jobs[1].error.message, /\[REDACTED\]/u);
 });
 
-test("validates maxImagesPerRequest configuration", async (t) => {
+test("validates provider request and output limits", async (t) => {
   const directory = await temporaryDirectory(t);
   const configPath = path.join(directory, "config.json");
   for (const value of [0, 5, 1.5, "invalid"]) {
@@ -690,6 +746,17 @@ test("validates maxImagesPerRequest configuration", async (t) => {
     await assert.rejects(
       loadConfig({ configPath, homeDir: directory, env: {} }),
       /maxImagesPerRequest must be an integer from 1 to 4/u,
+    );
+  }
+  for (const value of [0, 200 * 1024 * 1024 + 1, 1.5, "invalid"]) {
+    await fs.writeFile(configPath, JSON.stringify({
+      baseUrl: "http://localhost:3050/v1",
+      apiKey: "file-key",
+      maxOutputBytes: value,
+    }));
+    await assert.rejects(
+      loadConfig({ configPath, homeDir: directory, env: {} }),
+      /maxOutputBytes must be an integer from 1024 to 209715200/u,
     );
   }
 });

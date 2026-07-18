@@ -30,7 +30,8 @@ All remaining fields are optional advanced overrides. Their defaults are shown h
   "timeoutMs": 240000,
   "queueTimeoutMs": 600000,
   "maxRetries": 1,
-  "maxInputBytes": 26214400
+  "maxInputBytes": 26214400,
+  "maxOutputBytes": 52428800
 }
 ```
 
@@ -51,11 +52,14 @@ Supported environment variables:
 - `EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS`
 - `EKKO_IMAGE_GEN_MAX_RETRIES`
 - `EKKO_IMAGE_GEN_MAX_INPUT_BYTES`
+- `EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES`
 - `EKKO_IMAGE_GEN_RUNTIME_DIR`
 
 The runner reads configuration on every invocation; editing the JSON file does not require a Claude Code restart.
 
 `maxImagesPerRequest` is an optional provider capability ceiling from `1` to `4`, not the user's logical variant count. The default is `4`. When an upstream accepts a larger `n` but returns fewer items, the runner infers the effective response size and schedules bounded follow-up requests only for the remaining logical count. Set the field explicitly when the provider's limit is already known and the initial probe should be avoided.
+
+`maxOutputBytes` limits each decoded base64 image and each generated-image URL download. The default is `52428800` bytes (50 MiB). URL responses are checked by `Content-Length` when available and otherwise streamed under the limit, so an oversized provider response is rejected before it can be fully buffered or written.
 
 Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default is `gpt-image-2`, so normal installations omit `models`; configure an ordered list only when the endpoint uses different names or needs explicit fallback.
 
@@ -90,8 +94,8 @@ A single job object without `jobs` is accepted as shorthand.
 |---|---:|---|
 | `prompt` | yes | Non-empty generation or edit instruction. |
 | `id` | no | Stable report ID; defaults to `image-job-N`. |
-| `images` | no | Local paths, file URLs, HTTP(S) URLs, data URLs, or `{source,name}` objects. Presence selects image edit mode. |
-| `referenceImages` | no | Alias appended to `images`. |
+| `images` | no | One local path, file URL, HTTP(S) URL, data URL, `{source,name}` object, or an array of those values. Presence selects image edit mode. |
+| `referenceImages` | no | Scalar-or-array alias appended to `images`. |
 | `outputDir` | recommended | Absolute or working-directory-relative destination. |
 | `outputName` | recommended | Base name without extension. |
 | `output` | no | Explicit file-like path; its directory and base name override the preceding fields. |
@@ -136,6 +140,7 @@ The API may accept a requested tier while returning different actual pixel dimen
 - The standard request omits the legacy `response_format` field. GPT Image models return `b64_json` by default, and the runner also supports API responses containing an image URL.
 - `timeoutMs` remains active through response-body consumption, not only until headers arrive.
 - Generated base64 and URL payloads must decode to PNG, JPEG, GIF, WebP, or BMP bytes before any output file is written.
+- Generated base64 bytes and streamed URL downloads must stay within `maxOutputBytes`.
 
 ## Concurrency
 

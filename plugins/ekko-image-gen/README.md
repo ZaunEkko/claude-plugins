@@ -69,6 +69,8 @@ plugins/ekko-image-gen/
 
 `maxImagesPerRequest` 是可选的服务商单次请求能力上限，默认 `4`，有效范围 `1-4`。即使不配置，runner 发现上游短返回时也会根据实际 `data.length` 自动安排有界 follow-up，只补齐原始逻辑 `count`；已知服务能力时可以显式设置该字段减少一次探测请求。
 
+`maxOutputBytes` 是可选的单张输出上限，默认 50 MiB。base64 输出在解码后检查，服务返回的图片 URL 则按流式字节数限制，避免异常或恶意响应在校验前被完整缓冲到内存。
+
 标准请求默认不发送 `history_disabled`。只有在服务商明确支持该扩展时，才在具体 job 中显式设置布尔字段 `historyDisabled`。
 
 不要把真实 API Key 写入插件目录、项目仓库、提示词、测试夹具或日志。

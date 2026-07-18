@@ -15,10 +15,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Bumped `ekko-image-gen` to `0.1.8` so user-scope version-cached installations receive multi-image auto-adaptation, the standard GPT Image request shape, streamed size and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, intra-response partial-file preservation, precise model-fallback classification, correct environment model precedence, and public marketplace documentation.
+- Bumped `ekko-image-gen` to `0.1.9` so user-scope version-cached installations receive scalar-reference normalization, bounded output downloads, multi-image auto-adaptation, the standard GPT Image request shape, streamed input and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, intra-response partial-file preservation, precise model-fallback classification, correct environment model precedence, and public marketplace documentation.
 
 ### Fixed
 
+- Preserved scalar `images` and `referenceImages` values as one-element reference lists instead of silently routing those jobs to text generation.
+- Bounded generated base64 images and streamed image-URL downloads with the configurable `maxOutputBytes` limit.
 - Returned files already written from an upstream response when a later item in that same response fails decoding, downloading, or writing, reporting the job as `partial` with usage and item-index diagnostics.
 - Limited 400/404/422 model fallback to explicit model error codes or strict model-unavailability wording, so content-policy and ordinary parameter errors are not resubmitted to later models.
 - Kept request timeouts active until JSON or image response bodies finish streaming, so a server cannot hold a global slot indefinitely after sending headers.
