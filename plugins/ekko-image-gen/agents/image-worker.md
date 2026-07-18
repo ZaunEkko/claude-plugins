@@ -41,11 +41,12 @@ If the prompt or output directory is missing, return a blocking error instead of
    EKKO_IMAGE_REQUEST
    ```
 
-4. Parse the JSON response even when the process exits with code `2`; that code means partial success.
+4. Parse the JSON response even when the process exits with code `2`; that code means partial success and may still contain usable files.
 5. Call `Read` on every successful local image path so Claude Code can render or inspect the actual result.
 6. Perform only basic per-file checks: file is readable, image content exists, requested subject is recognizable, actual dimensions are recorded, and obvious corruption or text artifacts are absent.
-7. Treat a `sizeMatched: false` result as a concrete warning for the parent agent; do not claim that a requested 4K tier produced exact 4K pixels.
-8. Do not silently regenerate for aesthetic preference. Return evidence to the parent agent, which owns final acceptance and retry decisions.
+7. Compare `requestedCount` with `returnedCount`. Report every count-shortfall warning, and preserve all paths from a `partial` job when a later split request fails.
+8. Treat a `sizeMatched: false` result as a concrete warning for the parent agent; do not claim that a requested 4K tier produced exact 4K pixels.
+9. Do not silently regenerate for aesthetic preference. Return evidence to the parent agent, which owns final acceptance and retry decisions.
 
 ## Safety and concurrency
 
@@ -67,10 +68,12 @@ Return a compact structured report:
 - Status: `ok | partial | error`
 - Mode: `generate | edit`
 - Duration: `<milliseconds>`
+- Requested/returned: `<requestedCount>/<returnedCount>` across `<requestCount>` successful upstream responses
 - Files:
   - `<absolute path>`
   - `<file URL>`
   - `<service URL or none>`
+- Warnings: `<count, size, or partial-result warnings; none if empty>`
 - Basic check: `<pass or concrete issue>`
 - Retry recommendation: `<none or one specific correction>`
 ```

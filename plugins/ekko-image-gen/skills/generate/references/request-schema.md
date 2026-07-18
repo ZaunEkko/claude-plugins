@@ -8,21 +8,25 @@ Read configuration from the first available source:
 2. the JSON file named by `EKKO_IMAGE_GEN_CONFIG`;
 3. `~/.claude/ekko-image-gen.local.json`.
 
-Environment values override JSON values. Keep the API key outside the plugin repository.
+Environment values override JSON values. Keep the API key outside the plugin repository. A normal installation only needs:
 
 ```json
 {
-  "baseUrl": "http://localhost:3050/v1",
-  "apiKey": "replace-with-local-key",
-  "models": [
-    "plus-codex-gpt-image-2",
-    "codex-gpt-image-2",
-    "gpt-image-2"
-  ],
+  "baseUrl": "https://your-openai-compatible-service.example/v1",
+  "apiKey": "replace-with-local-key"
+}
+```
+
+All remaining fields are optional advanced overrides. Their defaults are shown here:
+
+```json
+{
+  "models": ["gpt-image-2"],
   "size": "1024x1024",
   "quality": "auto",
   "maxConcurrency": 4,
   "maxGlobalConcurrency": 4,
+  "maxImagesPerRequest": 4,
   "timeoutMs": 240000,
   "queueTimeoutMs": 600000,
   "maxRetries": 1,
@@ -42,6 +46,7 @@ Supported environment variables:
 - `EKKO_IMAGE_GEN_QUALITY`
 - `EKKO_IMAGE_GEN_MAX_CONCURRENCY`
 - `EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY`
+- `EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST`
 - `EKKO_IMAGE_GEN_TIMEOUT_MS`
 - `EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS`
 - `EKKO_IMAGE_GEN_MAX_RETRIES`
@@ -49,6 +54,10 @@ Supported environment variables:
 - `EKKO_IMAGE_GEN_RUNTIME_DIR`
 
 The runner reads configuration on every invocation; editing the JSON file does not require a Claude Code restart.
+
+`maxImagesPerRequest` is an optional provider capability ceiling from `1` to `4`, not the user's logical variant count. The default is `4`. When an upstream accepts a larger `n` but returns fewer items, the runner infers the effective response size and schedules bounded follow-up requests only for the remaining logical count. Set the field explicitly when the provider's limit is already known and the initial probe should be avoided.
+
+Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default is `gpt-image-2`, so normal installations omit `models`; configure an ordered list only when the endpoint uses different names or needs explicit fallback.
 
 ## Input JSON
 
@@ -64,12 +73,10 @@ Pass JSON through stdin or use `--request <file>`.
       "images": [],
       "outputDir": "D:/game/Assets/UI/Items",
       "outputName": "health-potion",
-      "models": ["plus-codex-gpt-image-2", "codex-gpt-image-2", "gpt-image-2"],
       "aspectRatio": "1:1",
       "resolution": "1k",
       "quality": "auto",
-      "count": 1,
-      "historyDisabled": true
+      "count": 1
     }
   ]
 }
@@ -95,8 +102,8 @@ A single job object without `jobs` is accepted as shorthand.
 | `aspectRatio` | no | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, or `auto`. |
 | `resolution` | no | `1k`, `2k`, `4k`, or `auto`; only combinations exposed by the service UI are accepted. |
 | `quality` | no | `auto`, `low`, `medium`, or `high`. |
-| `count` / `n` | no | Images per request, `1-4`. |
-| `historyDisabled` | no | Defaults to `true`. |
+| `count` / `n` | no | Logical images requested for this job, `1-4`; the runner may split them across upstream requests. |
+| `historyDisabled` | no | Provider-specific generation extension. When omitted, the runner does not send `history_disabled`; set a boolean only for services that document support. |
 
 The runner validates uploaded bytes as PNG, JPEG, GIF, WebP, or BMP and refuses arbitrary files.
 
@@ -129,9 +136,11 @@ The API may accept a requested tier while returning different actual pixel dimen
 
 ## Concurrency
 
-`concurrency` controls jobs in one runner process. `maxGlobalConcurrency` uses atomic slot directories under `~/.claude/ekko-image-gen/runtime/slots`, so separate worker agents and separate Claude Code sessions share a bounded cross-process limit. Abandoned slots are removed after a conservative stale timeout.
+`concurrency` controls independent jobs in one runner process. `maxGlobalConcurrency` uses atomic slot directories under `~/.claude/ekko-image-gen/runtime/slots`, so separate worker agents and separate Claude Code sessions share a bounded cross-process limit. Abandoned slots are removed after a conservative stale timeout.
 
-Use one request with `count: 1-4` for variants of one prompt. Use multiple concurrent jobs for different prompts or assets.
+Use one logical job with `count: 1-4` for variants of one prompt. The runner splits that count into serial upstream requests according to `maxImagesPerRequest`; every request still acquires its own global slot. Use multiple concurrent jobs for different prompts or assets.
+
+If an upstream response returns fewer items than requested, the runner preserves those files, emits a count warning, and replaces the remaining request plan with bounded follow-up chunks inferred from the actual response. It never requests more than the original logical count. If a later request fails, earlier files remain available in a job with `status: "partial"`.
 
 ## Output JSON
 
@@ -141,6 +150,7 @@ Use one request with `count: 1-4` for variants of one prompt. Use multiple concu
   "summary": {
     "total": 1,
     "succeeded": 1,
+    "partial": 0,
     "failed": 0,
     "durationMs": 36000,
     "concurrency": 1,
@@ -151,6 +161,21 @@ Use one request with `count: 1-4` for variants of one prompt. Use multiple concu
       "id": "inventory-potion",
       "status": "ok",
       "mode": "generate",
+      "model": "plus-codex-gpt-image-2",
+      "requestedCount": 1,
+      "returnedCount": 1,
+      "requestCount": 1,
+      "countSplitUsed": false,
+      "usage": null,
+      "usageByRequest": [
+        {
+          "requestIndex": 1,
+          "requestedCount": 1,
+          "returnedCount": 1,
+          "serviceReturnedCount": 1,
+          "usage": null
+        }
+      ],
       "files": [
         {
           "path": "D:\\game\\Assets\\UI\\Items\\health-potion.png",

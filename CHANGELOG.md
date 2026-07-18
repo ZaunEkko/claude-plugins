@@ -6,11 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Added `ekko-image-gen@zaunekko`, a local-service image generation plugin with one skill command for text-to-image and pasted-reference image editing.
+- Added `ekko-image-gen@zaunekko`, an OpenAI-compatible image generation plugin with one skill command for text-to-image and pasted-reference image editing against localhost or third-party HTTPS endpoints.
 - Added context-aware output placement, clickable local file and directory links, direct Claude Code image inspection, bounded parallel leaf workers, parent-agent visual acceptance, and targeted retries.
 - Added a dependency-free Node.js runner with JSON/multipart routing, remote-reference host download, collision-safe writes, API-key redaction, partial-success reporting, and a cross-process global concurrency semaphore.
-- Added preferred model fallback (`plus-codex-gpt-image-2` → `codex-gpt-image-2` → `gpt-image-2`), UI-derived aspect-ratio and 1K/2K/4K presets, and actual output-dimension reporting when upstream pixels differ from the requested tier.
-- Added isolated tests for generation, image editing, configuration overrides, output links, collision handling, model fallback, size presets, concurrency limiting, partial success, and secret redaction.
+- Added provider-defined model fallback with `gpt-image-2` as the public default, UI-derived aspect-ratio and 1K/2K/4K presets, and actual output-dimension reporting when upstream pixels differ from the requested tier.
+- Added isolated tests for generation, image editing, minimal and advanced configuration, output links, collision handling, model fallback, size presets, concurrency limiting, partial success, provider extensions, and secret redaction.
+- Added provider-cap-aware logical image counts through optional `maxImagesPerRequest`, automatic bounded follow-up after short responses, serial within-job request splitting, deterministic multi-file naming, per-request usage records, and preservation of files from partially completed jobs.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.2` so user-scope version-cached installations receive multi-image auto-adaptation, the standard request shape, and public marketplace documentation.
 
 ### Fixed
 

@@ -7,11 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DEFAULT_MODELS = Object.freeze([
-  "plus-codex-gpt-image-2",
-  "codex-gpt-image-2",
-  "gpt-image-2",
-]);
+const DEFAULT_MODELS = Object.freeze(["gpt-image-2"]);
 
 const SIZE_PRESETS = Object.freeze({
   "auto@auto": "1024x1024",
@@ -36,6 +32,7 @@ const DEFAULT_CONFIG = Object.freeze({
   quality: "auto",
   maxConcurrency: 4,
   maxGlobalConcurrency: 4,
+  maxImagesPerRequest: 4,
   timeoutMs: 240000,
   queueTimeoutMs: 600000,
   maxRetries: 1,
@@ -186,6 +183,8 @@ function mergeEnvironment(fileConfig, env) {
     maxConcurrency: env.EKKO_IMAGE_GEN_MAX_CONCURRENCY ?? fileConfig.maxConcurrency,
     maxGlobalConcurrency:
       env.EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY ?? fileConfig.maxGlobalConcurrency,
+    maxImagesPerRequest:
+      env.EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST ?? fileConfig.maxImagesPerRequest,
     timeoutMs: env.EKKO_IMAGE_GEN_TIMEOUT_MS ?? fileConfig.timeoutMs,
     queueTimeoutMs: env.EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS ?? fileConfig.queueTimeoutMs,
     maxRetries: env.EKKO_IMAGE_GEN_MAX_RETRIES ?? fileConfig.maxRetries,
@@ -230,6 +229,13 @@ export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
       1,
       32,
       "maxGlobalConcurrency",
+    ),
+    maxImagesPerRequest: boundedInteger(
+      raw.maxImagesPerRequest,
+      DEFAULT_CONFIG.maxImagesPerRequest,
+      1,
+      4,
+      "maxImagesPerRequest",
     ),
     timeoutMs: boundedInteger(raw.timeoutMs, DEFAULT_CONFIG.timeoutMs, 5000, 600000, "timeoutMs"),
     queueTimeoutMs: boundedInteger(
@@ -276,7 +282,7 @@ export async function loadConfig({ env = process.env, homeDir = os.homedir(), co
 export function sanitizeBaseName(value, fallback = "generated-image") {
   const normalized = (nonEmptyString(value) ?? fallback)
     .normalize("NFKC")
-    .replace(/[<>:"/\\|?* -]/gu, "-")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/gu, "-")
     .replace(/\s+/gu, "-")
     .replace(/-+/gu, "-")
     .replace(/^[. -]+|[. -]+$/gu, "")
@@ -358,6 +364,13 @@ function normalizeJob(raw, index, config, cwd) {
     });
   }
 
+  const historyDisabled = raw.historyDisabled;
+  if (historyDisabled !== undefined && typeof historyDisabled !== "boolean") {
+    throw new ImageGenError(`jobs[${index}].historyDisabled must be a boolean`, {
+      code: "invalid_request",
+    });
+  }
+
   return {
     id,
     prompt,
@@ -370,7 +383,7 @@ function normalizeJob(raw, index, config, cwd) {
     resolution: size.resolution,
     quality,
     count,
-    historyDisabled: raw.historyDisabled !== false,
+    historyDisabled: typeof historyDisabled === "boolean" ? historyDisabled : null,
   };
 }
 
@@ -701,23 +714,34 @@ async function callApi(endpoint, buildRequest, config, fetchImpl) {
   throw lastError;
 }
 
-function generationBody(job, model) {
-  return {
+function splitRequestCounts(total, maximum) {
+  const counts = [];
+  for (let remaining = total; remaining > 0; remaining -= maximum) {
+    counts.push(Math.min(remaining, maximum));
+  }
+  return counts;
+}
+
+function generationBody(job, model, count) {
+  const body = {
     model,
     prompt: job.prompt,
-    n: job.count,
+    n: count,
     size: job.size,
     quality: job.quality,
     response_format: "b64_json",
-    history_disabled: job.historyDisabled,
   };
+  if (job.historyDisabled !== null) {
+    body.history_disabled = job.historyDisabled;
+  }
+  return body;
 }
 
-function editBody(job, inputs, model) {
+function editBody(job, inputs, model, count) {
   const form = new FormData();
   form.append("model", model);
   form.append("prompt", job.prompt);
-  form.append("n", String(job.count));
+  form.append("n", String(count));
   form.append("size", job.size);
   form.append("quality", job.quality);
   form.append("response_format", "b64_json");
@@ -725,6 +749,25 @@ function editBody(job, inputs, model) {
     form.append("image", new Blob([input.bytes], { type: input.mime }), input.name);
   }
   return form;
+}
+
+async function requestImageChunk(job, inputs, mode, model, count, config, fetchImpl) {
+  return mode === "generate"
+    ? callApi(
+        "/images/generations",
+        () => ({
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(generationBody(job, model, count)),
+        }),
+        config,
+        fetchImpl,
+      )
+    : callApi(
+        "/images/edits",
+        () => ({ body: editBody(job, inputs, model, count) }),
+        config,
+        fetchImpl,
+      );
 }
 
 async function responseItemBytes(item, config, fetchImpl) {
@@ -777,21 +820,31 @@ async function writeUniqueFile(outputDir, baseName, index, total, extension, byt
   });
 }
 
-async function persistResponse(job, body, config, fetchImpl) {
+async function persistResponse(
+  job,
+  body,
+  config,
+  fetchImpl,
+  { startIndex = 0, totalRequested = body?.data?.length ?? 1, limit = null } = {},
+) {
   if (!Array.isArray(body?.data) || body.data.length === 0) {
     throw new ImageGenError("Image service returned no image data", { code: "invalid_response" });
   }
+  const items = limit === null ? body.data : body.data.slice(0, limit);
+  if (items.length === 0) {
+    throw new ImageGenError("Image service returned no usable image data", { code: "invalid_response" });
+  }
   const requested = validatedDimensions(job.size, "size");
   const files = [];
-  for (let index = 0; index < body.data.length; index += 1) {
-    const item = body.data[index];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
     const resolved = await responseItemBytes(item, config, fetchImpl);
     const dimensions = imageDimensions(resolved.bytes, resolved.mime);
     const filePath = await writeUniqueFile(
       job.outputDir,
       job.outputName,
-      index,
-      body.data.length,
+      startIndex + index,
+      totalRequested,
       extensionForMime(resolved.mime),
       resolved.bytes,
     );
@@ -817,79 +870,244 @@ async function persistResponse(job, body, config, fetchImpl) {
   return files;
 }
 
+function buildJobResult(
+  job,
+  {
+    status,
+    mode,
+    selectedModel,
+    modelAttempts,
+    inputCount,
+    startedAt,
+    files,
+    requestCounts,
+    usageByRequest,
+    countWarnings,
+    error = null,
+    apiKey = null,
+  },
+) {
+  const effectiveCountWarnings = [...countWarnings];
+  if (files.length < job.count) {
+    effectiveCountWarnings.push(
+      `Requested ${job.count} images, but ${files.length} were saved across ${usageByRequest.length} upstream requests`,
+    );
+  }
+  const warnings = [
+    ...effectiveCountWarnings,
+    ...files
+      .filter((file) => file.sizeMatched === false)
+      .map((file) =>
+        `Requested ${file.requestedWidth}x${file.requestedHeight}, but the service returned ${file.width}x${file.height}`,
+      ),
+  ];
+  const result = {
+    id: job.id,
+    status,
+    mode,
+    model: selectedModel,
+    requestedModels: job.models,
+    modelAttempts,
+    fallbackUsed: selectedModel !== null && selectedModel !== job.models[0],
+    size: job.size,
+    aspectRatio: job.aspectRatio,
+    resolution: job.resolution,
+    quality: job.quality,
+    inputCount,
+    requestedCount: job.count,
+    returnedCount: files.length,
+    requestCount: usageByRequest.length,
+    countSplitUsed: requestCounts.length > 1,
+    durationMs: Date.now() - startedAt,
+    files,
+    warnings,
+    usage: usageByRequest.length === 1 ? usageByRequest[0].usage : null,
+    usageByRequest,
+  };
+  if (error) {
+    result.error = {
+      code: error.code ?? "image_gen_error",
+      message: redact(error.message, apiKey),
+      status: error.status ?? null,
+      details: error.details ?? null,
+    };
+  }
+  return result;
+}
+
 async function runJob(job, config, fetchImpl, cwd) {
   const startedAt = Date.now();
   const inputs = await Promise.all(
     job.images.map((image) => loadImageBytes(image, config, fetchImpl, cwd)),
   );
   const mode = inputs.length > 0 ? "edit" : "generate";
+  const requestCounts = splitRequestCounts(job.count, config.maxImagesPerRequest);
   const modelAttempts = [];
-  let body = null;
+  const files = [];
+  const usageByRequest = [];
+  const countWarnings = [];
   let selectedModel = null;
 
-  for (let index = 0; index < job.models.length; index += 1) {
-    const model = job.models[index];
-    try {
-      body = mode === "generate"
-        ? await callApi(
-            "/images/generations",
-            () => ({
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(generationBody(job, model)),
-            }),
-            config,
-            fetchImpl,
-          )
-        : await callApi(
-            "/images/edits",
-            () => ({ body: editBody(job, inputs, model) }),
+  for (let requestIndex = 0; requestIndex < requestCounts.length; requestIndex += 1) {
+    const requestedCount = requestCounts[requestIndex];
+    let body = null;
+
+    if (requestIndex === 0) {
+      for (let modelIndex = 0; modelIndex < job.models.length; modelIndex += 1) {
+        const model = job.models[modelIndex];
+        try {
+          body = await requestImageChunk(
+            job,
+            inputs,
+            mode,
+            model,
+            requestedCount,
             config,
             fetchImpl,
           );
-      selectedModel = model;
-      modelAttempts.push({ model, status: "ok", code: null, httpStatus: 200 });
-      break;
-    } catch (error) {
-      modelAttempts.push({
-        model,
-        status: "error",
-        code: error.code ?? "image_gen_error",
-        httpStatus: error.status ?? null,
+          selectedModel = model;
+          modelAttempts.push({ model, status: "ok", code: null, httpStatus: 200 });
+          break;
+        } catch (error) {
+          modelAttempts.push({
+            model,
+            status: "error",
+            code: error.code ?? "image_gen_error",
+            httpStatus: error.status ?? null,
+          });
+          if (modelIndex === job.models.length - 1 || !shouldFallbackModel(error)) {
+            throw new ImageGenError(error.message, {
+              code: error.code,
+              status: error.status,
+              details: { modelAttempts },
+            });
+          }
+        }
+      }
+    } else {
+      try {
+        body = await requestImageChunk(
+          job,
+          inputs,
+          mode,
+          selectedModel,
+          requestedCount,
+          config,
+          fetchImpl,
+        );
+      } catch (error) {
+        return buildJobResult(job, {
+          status: "partial",
+          mode,
+          selectedModel,
+          modelAttempts,
+          inputCount: inputs.length,
+          startedAt,
+          files,
+          requestCounts,
+          usageByRequest,
+          countWarnings,
+          error: new ImageGenError(error.message, {
+            code: error.code,
+            status: error.status,
+            details: {
+              ...(error.details && typeof error.details === "object" ? error.details : {}),
+              requestIndex: requestIndex + 1,
+              requestedCount,
+              model: selectedModel,
+            },
+          }),
+          apiKey: config.apiKey,
+        });
+      }
+    }
+
+    const serviceReturnedCount = Array.isArray(body?.data) ? body.data.length : 0;
+    let chunkFiles;
+    try {
+      chunkFiles = await persistResponse(job, body, config, fetchImpl, {
+        startIndex: files.length,
+        totalRequested: job.count,
+        limit: requestedCount,
       });
-      if (index === job.models.length - 1 || !shouldFallbackModel(error)) {
+    } catch (error) {
+      if (files.length === 0) {
         throw new ImageGenError(error.message, {
           code: error.code,
           status: error.status,
           details: { modelAttempts },
         });
       }
+      return buildJobResult(job, {
+        status: "partial",
+        mode,
+        selectedModel,
+        modelAttempts,
+        inputCount: inputs.length,
+        startedAt,
+        files,
+        requestCounts,
+        usageByRequest,
+        countWarnings,
+        error: new ImageGenError(error.message, {
+          code: error.code,
+          status: error.status,
+          details: {
+            ...(error.details && typeof error.details === "object" ? error.details : {}),
+            requestIndex: requestIndex + 1,
+            requestedCount,
+            model: selectedModel,
+          },
+        }),
+        apiKey: config.apiKey,
+      });
+    }
+
+    files.push(...chunkFiles);
+    usageByRequest.push({
+      requestIndex: requestIndex + 1,
+      requestedCount,
+      returnedCount: chunkFiles.length,
+      serviceReturnedCount,
+      usage: body?.usage ?? null,
+    });
+    if (serviceReturnedCount < requestedCount) {
+      const remainingCount = job.count - files.length;
+      const inferredCap = Math.max(1, chunkFiles.length);
+      if (remainingCount > 0) {
+        const recoveryCounts = splitRequestCounts(remainingCount, inferredCap);
+        requestCounts.splice(
+          requestIndex + 1,
+          requestCounts.length - requestIndex - 1,
+          ...recoveryCounts,
+        );
+        countWarnings.push(
+          `Requested ${requestedCount} images in upstream request ${requestIndex + 1}, but the service returned ${serviceReturnedCount}; scheduled ${recoveryCounts.length} bounded follow-up request(s) for the remaining ${remainingCount}`,
+        );
+      } else {
+        countWarnings.push(
+          `Requested ${requestedCount} images in upstream request ${requestIndex + 1}, but the service returned ${serviceReturnedCount}`,
+        );
+      }
+    } else if (serviceReturnedCount > requestedCount) {
+      countWarnings.push(
+        `Requested ${requestedCount} images in upstream request ${requestIndex + 1}, but the service returned ${serviceReturnedCount}; saved the first ${requestedCount}`,
+      );
     }
   }
 
-  const files = await persistResponse(job, body, config, fetchImpl);
-  const warnings = files
-    .filter((file) => file.sizeMatched === false)
-    .map((file) =>
-      `Requested ${file.requestedWidth}x${file.requestedHeight}, but the service returned ${file.width}x${file.height}`,
-    );
-  return {
-    id: job.id,
+  return buildJobResult(job, {
     status: "ok",
     mode,
-    model: selectedModel,
-    requestedModels: job.models,
+    selectedModel,
     modelAttempts,
-    fallbackUsed: selectedModel !== job.models[0],
-    size: job.size,
-    aspectRatio: job.aspectRatio,
-    resolution: job.resolution,
-    quality: job.quality,
     inputCount: inputs.length,
-    durationMs: Date.now() - startedAt,
+    startedAt,
     files,
-    warnings,
-    usage: body?.usage ?? null,
-  };
+    requestCounts,
+    usageByRequest,
+    countWarnings,
+  });
 }
 
 async function mapLimit(items, limit, worker) {
@@ -950,12 +1168,15 @@ export async function runJobs(payload, options = {}) {
     }
   });
   const succeeded = jobs.filter((job) => job.status === "ok").length;
-  const failed = jobs.length - succeeded;
+  const partial = jobs.filter((job) => job.status === "partial").length;
+  const failed = jobs.filter((job) => job.status === "error").length;
+  const hasOutput = succeeded + partial > 0;
   return {
-    status: failed === 0 ? "ok" : succeeded === 0 ? "error" : "partial",
+    status: failed === 0 && partial === 0 ? "ok" : hasOutput ? "partial" : "error",
     summary: {
       total: jobs.length,
       succeeded,
+      partial,
       failed,
       durationMs: Date.now() - startedAt,
       concurrency: request.concurrency,
@@ -966,7 +1187,7 @@ export async function runJobs(payload, options = {}) {
 }
 
 function helpText() {
-  return `Usage: node image-gen.mjs [--request FILE]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_BASE_URL, EKKO_IMAGE_GEN_API_KEY,\nEKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL, EKKO_IMAGE_GEN_SIZE,\nEKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION, EKKO_IMAGE_GEN_QUALITY,\nEKKO_IMAGE_GEN_MAX_CONCURRENCY, EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY.\n`;
+  return `Usage: node image-gen.mjs [--request FILE]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR.\n`;
 }
 
 async function readStdin() {

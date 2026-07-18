@@ -3,10 +3,10 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns clickable local links.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.0
+version: 0.1.2
 ---
 
-# Generate images with the local service
+# Generate images with an OpenAI-compatible service
 
 Treat `$ARGUMENTS` and the full current user message as the image brief. Include images pasted or attached to that same message as reference inputs. Route text-only jobs to text-to-image and jobs with references to image editing through the bundled runner.
 
@@ -42,21 +42,18 @@ Create a concise job specification for each independent asset:
 - model priority or a strict model override when needed;
 - aspect ratio, resolution tier, or explicit size;
 - quality and count from 1 to 4 when overriding local defaults;
+- `historyDisabled` only when the configured provider explicitly supports that extension; omit it for the standard request shape;
 - concrete acceptance criteria.
 
-For one prompt requesting variants, prefer one API request with `count` up to `4`. For different prompts or different target assets, create separate jobs.
+For one prompt requesting variants, keep one logical runner job with `count` up to `4`. The runner may split that job into serial upstream requests according to the configured provider cap or an observed short response. For different prompts or different target assets, create separate jobs.
 
 Keep style-critical constraints shared across related jobs. Avoid vague prompts such as "make it nice"; encode composition, subject, palette, background, perspective, transparency intent, exclusions, and target use.
 
 ## Select model and dimensions
 
-Use the configured model priority by default:
+Use the configured model priority. The repository default is `gpt-image-2`; treat model names as provider-defined and allow users to configure an ordered fallback list for their own OpenAI-compatible service.
 
-1. `plus-codex-gpt-image-2` for the preferred high-quality path;
-2. `codex-gpt-image-2` as the next preferred path;
-3. `gpt-image-2` as the general fallback.
-
-Let the runner retry the same model for transient failures and then move through the fallback list for upstream, availability, or model-specific failures. Do not fall back for authentication errors, content-policy rejection, malformed prompts, or unrelated invalid parameters. When the user explicitly names a model, place it first; set `strictModel: true` only when the user requires that exact model and does not want fallback.
+Let the runner retry the same model for transient failures and then move through any configured fallback list for upstream, availability, or model-specific failures. Do not fall back for authentication errors, content-policy rejection, malformed prompts, or unrelated invalid parameters. When the user explicitly names a model, place it first; set `strictModel: true` only when the user requires that exact model and does not want fallback.
 
 Choose aspect ratio and resolution from the consuming context:
 
@@ -106,9 +103,10 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 2. Call `Read` on each generated image so a capable Claude Code UI can render it and so the parent agent can inspect the actual pixels.
 3. Compare each image with its job criteria and compare related assets with the shared direction.
 4. Check subject, composition, dimensions, background intent, legibility, unwanted text, obvious artifacts, identity preservation, and consistency with neighboring assets.
-5. Accept compliant images.
-6. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration.
-7. Never delete a rejected output automatically. Keep it available unless the user explicitly asks for cleanup.
+5. Compare `requestedCount` with `returnedCount`, surface count-shortfall warnings, and preserve every file from a `partial` job.
+6. Accept compliant images.
+7. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration.
+8. Never delete a rejected output automatically. Keep it available unless the user explicitly asks for cleanup.
 
 ## Present results
 

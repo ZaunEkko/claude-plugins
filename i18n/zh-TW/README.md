@@ -2,7 +2,7 @@
 
 # 🧩 Claude Code Plugins
 
-### 個人化 Claude Code 外掛市集
+### 通用 Claude Code 外掛市集
 
 *把順手的 skills、agents、hooks、MCP 設定與相容命令，封裝成可安裝、可驗證、可協作維護的 Claude Code 能力*
 
@@ -37,7 +37,7 @@
 | 外掛 | 狀態 | 說明 | 文件 |
 |---|---|---|---|
 | `commit-commands` | 可用 · 相容分發 | 保留三個官方命令名稱，將目前工作階段模型與可用 effort 寫入 Git commit attribution，並阻止 Claude Code 直接 commit 繞過 wrapper。 | [使用指南](docs/commit-commands/README.md) · [實作與上游說明](../../plugins/commit-commands/README.md) |
-| `ekko-image-gen` | 本機可用 · 原創 | 以單一命令完成本機文生圖、貼上參考圖後的圖生圖、專案感知輸出、受控葉子 worker、視覺驗收與可點擊本機檔案。 | [使用指南](../../docs/ekko-image-gen/README.md) · [實作說明](../../plugins/ekko-image-gen/README.md) |
+| `ekko-image-gen` | 可用 · 原創 | 以單一命令呼叫使用者設定的 OpenAI-compatible Images API（localhost 或第三方 HTTPS），支援文生圖、貼上參考圖後的圖生圖、專案感知輸出、受控葉子 worker、視覺驗收與可點擊本機檔案。 | [使用指南](../../docs/ekko-image-gen/README.md) · [實作說明](../../plugins/ekko-image-gen/README.md) |
 
 `commit-commands` 與官方分發使用相同命名空間；同一 scope 只能啟用其中一個。
 
@@ -48,6 +48,7 @@
 ```text
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
+/plugin install ekko-image-gen@zaunekko
 /reload-plugins
 ```
 
@@ -56,11 +57,10 @@
 把以下指令交給 Claude Code Agent：
 
 ```text
-請幫我安裝這個 Claude Code plugin marketplace：
+請幫我安裝這個 Claude Code plugin marketplace 中的全部外掛：
 https://github.com/ZaunEkko/claude-plugins
 
-目標外掛：commit-commands@zaunekko
-請先確認 user、project 或 local scope，只修改我選擇的 scope。若同一 scope 已啟用官方 commit-commands，請先說明命名空間衝突，再停用官方版本但不要解除安裝。完成後執行 /reload-plugins，回報實際命令與結果；遇到權限、認證或安全確認時先讓我決定。
+請先確認 user、project 或 local scope，只修改我選擇的 scope。加入並更新 zaunekko marketplace、讀取目前清單，然後安裝並啟用全部外掛。若同一 scope 已啟用官方 commit-commands，請先說明命名空間衝突，再停用官方版本但不要解除安裝。對 ekko-image-gen，若 `~/.claude/ekko-image-gen.local.json` 不存在，請建立只含 `baseUrl` 與佔位 `apiKey` 的模板，提示我直接編輯本機檔案，且不要要求我在對話中貼上真實密鑰。完成後執行 /reload-plugins，回報實際命令、結果與仍需填寫的設定；遇到權限、認證或安全確認時先讓我決定。
 ```
 
 ### CLI 安裝
@@ -69,6 +69,7 @@ https://github.com/ZaunEkko/claude-plugins
 claude plugin marketplace add ZaunEkko/claude-plugins
 claude plugin marketplace update zaunekko
 claude plugin install commit-commands@zaunekko --scope user
+claude plugin install ekko-image-gen@zaunekko --scope user
 ```
 
 若同一 scope 已啟用官方版本：
@@ -89,7 +90,21 @@ claude plugin enable commit-commands@zaunekko --scope user
 ```bash
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
+claude plugin update ekko-image-gen@zaunekko --scope user
 ```
+
+### 設定 `ekko-image-gen`
+
+建立 `~/.claude/ekko-image-gen.local.json`（Windows 為 `%USERPROFILE%\.claude\ekko-image-gen.local.json`）：
+
+```json
+{
+  "baseUrl": "https://your-openai-compatible-service.example/v1",
+  "apiKey": "replace-with-local-key"
+}
+```
+
+endpoint 可以是 localhost 或第三方 HTTPS 服務。請勿提交真實密鑰，也不要貼到 Agent 對話中；預設模型與多圖能力會由外掛處理。
 
 | Scope | 用途 | 設定檔 |
 |---|---|---|
@@ -106,6 +121,7 @@ claude plugin update commit-commands@zaunekko --scope user
 | `/commit-commands:commit` | 檢查變更、暫存相關檔案並建立一個 commit。 |
 | `/commit-commands:commit-push-pr` | 依序 commit、push 並建立 Pull Request。 |
 | `/commit-commands:clean_gone` | 先產生確定性清理計畫並要求明確確認，再只移除精確 `refs/remotes/...` 上游已不存在的安全分支與符合條件的乾淨 worktree。 |
+| `/ekko-image-gen:generate` | 透過設定的 OpenAI-compatible Images API 生成或編輯圖片，並依專案脈絡儲存、檢查與回報本機輸出。 |
 
 Attribution 範例：
 

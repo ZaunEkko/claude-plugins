@@ -104,6 +104,7 @@ test("loads user config and applies environment overrides", async (t) => {
     baseUrl: "http://localhost:3050/v1",
     apiKey: "file-key",
     maxConcurrency: 2,
+    maxImagesPerRequest: 2,
   }));
   const loaded = await loadConfig({
     configPath,
@@ -111,11 +112,29 @@ test("loads user config and applies environment overrides", async (t) => {
     env: {
       EKKO_IMAGE_GEN_API_KEY: "environment-key",
       EKKO_IMAGE_GEN_QUALITY: "high",
+      EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST: "1",
     },
   });
   assert.equal(loaded.apiKey, "environment-key");
   assert.equal(loaded.quality, "high");
   assert.equal(loaded.maxConcurrency, 2);
+  assert.equal(loaded.maxImagesPerRequest, 1);
+  assert.deepEqual(loaded.models, ["gpt-image-2"]);
+});
+
+test("uses public defaults when configuration contains only endpoint and key", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = path.join(directory, "config.json");
+  await fs.writeFile(configPath, JSON.stringify({
+    baseUrl: "https://images.example.test/v1",
+    apiKey: "file-key",
+  }));
+
+  const loaded = await loadConfig({ configPath, homeDir: directory, env: {} });
+
+  assert.equal(loaded.baseUrl, "https://images.example.test/v1");
+  assert.deepEqual(loaded.models, ["gpt-image-2"]);
+  assert.equal(loaded.maxImagesPerRequest, 4);
 });
 
 test("normalizes a single job and preserves an explicit output target", () => {
@@ -129,6 +148,11 @@ test("normalizes a single job and preserves an explicit output target", () => {
   assert.equal(normalized.jobs.length, 1);
   assert.equal(normalized.jobs[0].outputName, "logo");
   assert.equal(normalized.jobs[0].outputDir, path.resolve("project/assets/generated"));
+  assert.equal(normalized.jobs[0].historyDisabled, null);
+  assert.throws(
+    () => normalizeRequest({ prompt: "A logo", historyDisabled: "yes" }, config("http://localhost:3050/v1", path.resolve("runtime"))),
+    /historyDisabled must be a boolean/u,
+  );
 });
 
 test("generates an image, saves it without overwriting, and returns clickable URLs", async (t) => {
@@ -168,6 +192,7 @@ test("generates an image, saves it without overwriting, and returns clickable UR
   assert.equal(authorization, "Bearer test-secret-key");
   assert.equal(requestBody.prompt, "A blue icon");
   assert.equal(requestBody.response_format, "b64_json");
+  assert.equal("history_disabled" in requestBody, false);
   assert.equal(await fs.readFile(first.jobs[0].files[0].path, "base64"), PNG_BASE64);
   assert.equal(first.jobs[0].files[0].width, 1);
   assert.equal(first.jobs[0].files[0].height, 1);
@@ -176,6 +201,28 @@ test("generates an image, saves it without overwriting, and returns clickable UR
   assert.match(first.jobs[0].files[0].fileUrl, /^file:\/\//u);
   assert.match(first.jobs[0].files[0].directoryUrl, /^file:\/\//u);
   assert.notEqual(first.jobs[0].files[0].path, second.jobs[0].files[0].path);
+});
+
+test("sends the provider history extension only when explicitly requested", async (t) => {
+  const directory = await temporaryDirectory(t);
+  let requestBody = null;
+  const baseUrl = await startServer(t, async (request, response) => {
+    requestBody = JSON.parse((await readBody(request)).toString("utf8"));
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "history-extension",
+    prompt: "A private generation",
+    historyDisabled: true,
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime")),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(requestBody.history_disabled, true);
 });
 
 test("uploads local reference images with multipart form data", async (t) => {
@@ -235,7 +282,7 @@ test("enforces the shared global concurrency limit", async (t) => {
     }),
   });
 
-  assert.equal(result.status, "ok");
+  assert.equal(result.status, "ok", JSON.stringify(result, null, 2));
   assert.equal(result.summary.succeeded, 4);
   assert.equal(peak, 1);
 });
@@ -311,4 +358,246 @@ test("keeps successful paths when another job fails and redacts the API key", as
   assert.equal(result.jobs[1].status, "error");
   assert.doesNotMatch(JSON.stringify(result), /test-secret-key/u);
   assert.match(result.jobs[1].error.message, /\[REDACTED\]/u);
+});
+
+test("validates maxImagesPerRequest configuration", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = path.join(directory, "config.json");
+  for (const value of [0, 5, 1.5, "invalid"]) {
+    await fs.writeFile(configPath, JSON.stringify({
+      baseUrl: "http://localhost:3050/v1",
+      apiKey: "file-key",
+      maxImagesPerRequest: value,
+    }));
+    await assert.rejects(
+      loadConfig({ configPath, homeDir: directory, env: {} }),
+      /maxImagesPerRequest must be an integer from 1 to 4/u,
+    );
+  }
+});
+
+test("splits logical generation count into provider-sized requests", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const requestBodies = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    requestBodies.push(JSON.parse((await readBody(request)).toString("utf8")));
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "split-generation",
+    prompt: "Two variants",
+    count: 2,
+    outputDir: path.join(directory, "output"),
+    outputName: "split-generation",
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxImagesPerRequest: 1,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.deepEqual(requestBodies.map((body) => body.n), [1, 1]);
+  assert.equal(result.jobs[0].requestedCount, 2);
+  assert.equal(result.jobs[0].returnedCount, 2);
+  assert.equal(result.jobs[0].requestCount, 2);
+  assert.equal(result.jobs[0].countSplitUsed, true);
+  assert.equal(result.jobs[0].usage, null);
+  assert.equal(result.jobs[0].usageByRequest.length, 2);
+  assert.deepEqual(
+    result.jobs[0].files.map((file) => path.basename(file.path)),
+    ["split-generation-1.png", "split-generation-2.png"],
+  );
+});
+
+test("splits multipart edits and uploads references for every request", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const referencePath = path.join(directory, "reference.png");
+  await fs.writeFile(referencePath, PNG_BYTES);
+  const multipartBodies = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    assert.equal(request.url, "/v1/images/edits");
+    multipartBodies.push((await readBody(request)).toString("latin1"));
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "split-edit",
+    prompt: "Two edited variants",
+    images: [referencePath],
+    count: 2,
+    outputDir: path.join(directory, "output"),
+    outputName: "split-edit",
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxImagesPerRequest: 1,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.jobs[0].mode, "edit");
+  assert.equal(result.jobs[0].files.length, 2);
+  assert.equal(multipartBodies.length, 2);
+  for (const body of multipartBodies) {
+    assert.match(body, /name="n"\r\n\r\n1\r\n/u);
+    assert.match(body, /name="image"; filename="reference.png"/u);
+  }
+});
+
+test("pins the first successful fallback model across split requests", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const seenModels = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenModels.push(body.model);
+    if (body.model === "plus-codex-gpt-image-2") {
+      response.writeHead(502, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "upstream_error", message: "preferred model failed" },
+      }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "split-fallback",
+    prompt: "Fallback variants",
+    count: 2,
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["plus-codex-gpt-image-2", "codex-gpt-image-2", "gpt-image-2"],
+      model: undefined,
+      maxImagesPerRequest: 1,
+      maxRetries: 0,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.deepEqual(seenModels, [
+    "plus-codex-gpt-image-2",
+    "codex-gpt-image-2",
+    "codex-gpt-image-2",
+  ]);
+  assert.equal(result.jobs[0].model, "codex-gpt-image-2");
+  assert.equal(result.jobs[0].fallbackUsed, true);
+  assert.deepEqual(result.jobs[0].modelAttempts.map((attempt) => attempt.status), ["error", "ok"]);
+});
+
+test("automatically completes a logical count after a provider short response", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const requestedCounts = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    requestedCounts.push(body.n);
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "short-result",
+    prompt: "Two images in one logical job",
+    count: 2,
+    outputDir: path.join(directory, "output"),
+    outputName: "short-result",
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxImagesPerRequest: 4,
+    }),
+  });
+
+  assert.deepEqual(requestedCounts, [2, 1]);
+  assert.equal(result.status, "ok");
+  assert.equal(result.jobs[0].requestedCount, 2);
+  assert.equal(result.jobs[0].returnedCount, 2);
+  assert.equal(result.jobs[0].requestCount, 2);
+  assert.equal(result.jobs[0].countSplitUsed, true);
+  assert.deepEqual(
+    result.jobs[0].files.map((file) => path.basename(file.path)),
+    ["short-result-1.png", "short-result-2.png"],
+  );
+  assert.match(result.jobs[0].warnings.join("\n"), /scheduled 1 bounded follow-up request/u);
+  assert.doesNotMatch(result.jobs[0].warnings.join("\n"), /were saved across/u);
+});
+
+test("preserves files when a later split request fails", async (t) => {
+  const directory = await temporaryDirectory(t);
+  let requests = 0;
+  const baseUrl = await startServer(t, async (request, response) => {
+    await readBody(request);
+    requests += 1;
+    if (requests === 1) {
+      successResponse(response);
+      return;
+    }
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({
+      error: { code: "bad_request", message: "later request failed" },
+    }));
+  });
+
+  const result = await runJobs({
+    id: "partial-result",
+    prompt: "Two images with a later failure",
+    count: 2,
+    outputDir: path.join(directory, "output"),
+    outputName: "partial-result",
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxImagesPerRequest: 1,
+      maxRetries: 0,
+    }),
+  });
+
+  assert.equal(requests, 2);
+  assert.equal(result.status, "partial");
+  assert.equal(result.summary.succeeded, 0);
+  assert.equal(result.summary.partial, 1);
+  assert.equal(result.summary.failed, 0);
+  assert.equal(result.jobs[0].status, "partial");
+  assert.equal(result.jobs[0].returnedCount, 1);
+  assert.equal(result.jobs[0].error.code, "bad_request");
+  assert.equal(path.basename(result.jobs[0].files[0].path), "partial-result-1.png");
+  assert.match(result.jobs[0].warnings.join("\n"), /1 were saved/u);
+  await fs.access(result.jobs[0].files[0].path);
+});
+
+test("split requests retain the shared global concurrency limit", async (t) => {
+  const directory = await temporaryDirectory(t);
+  let active = 0;
+  let peak = 0;
+  let requests = 0;
+  const baseUrl = await startServer(t, async (request, response) => {
+    await readBody(request);
+    requests += 1;
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    active -= 1;
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    concurrency: 2,
+    jobs: [
+      { id: "split-a", prompt: "A", count: 2, outputDir: path.join(directory, "output") },
+      { id: "split-b", prompt: "B", count: 2, outputDir: path.join(directory, "output") },
+    ],
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxImagesPerRequest: 1,
+      maxConcurrency: 2,
+      maxGlobalConcurrency: 1,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(requests, 4);
+  assert.equal(peak, 1);
 });

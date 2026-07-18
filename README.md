@@ -2,7 +2,7 @@
 
 # 🧩 Claude Code Plugins
 
-### 个性化 Claude Code 插件市场
+### 通用 Claude Code 插件市场
 
 *把顺手的 skills、agents、hooks、MCP 配置与兼容命令，打包成可安装、可验证、可协作维护的 Claude Code 能力*
 
@@ -41,7 +41,7 @@
 | 插件 | 状态 | 说明 | 文档 |
 |---|---|---|---|
 | `commit-commands` | 可用 · 兼容分发 | 基于 Anthropic 官方同名插件，保留三个命令，提供当前会话模型 attribution、Bash 与已知 Playwright unsafe 提交防绕过保护、显式 detached session 绑定，以及确认式安全分支/worktree 清理。 | [使用指南](docs/commit-commands/README.md) · [实现与上游说明](plugins/commit-commands/README.md) |
-| `ekko-image-gen` | 本地可用 · 原创 | 使用一个命令调用本地图片服务，支持文生图、粘贴图片后的图生图、项目上下文感知落盘、受控并发叶子 worker、主代理视觉验收和可点击本地输出。 | [使用指南](docs/ekko-image-gen/README.md) · [实现说明](plugins/ekko-image-gen/README.md) |
+| `ekko-image-gen` | 可用 · 原创 | 使用一个命令调用用户配置的 OpenAI-compatible Images API（localhost 或第三方 HTTPS），支持文生图、粘贴图片后的图生图、项目上下文感知落盘、受控并发叶子 worker、主代理视觉验收和可点击本地输出。 | [使用指南](docs/ekko-image-gen/README.md) · [实现说明](plugins/ekko-image-gen/README.md) |
 
 `commit-commands` 与官方分发暴露相同命名空间。请在同一作用域内只启用一个版本。
 
@@ -54,6 +54,7 @@
 ```text
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
+/plugin install ekko-image-gen@zaunekko
 /reload-plugins
 ```
 
@@ -64,18 +65,17 @@
 把仓库链接和下面这段指令交给你的 Claude Code Agent：
 
 ```text
-请帮我安装这个 Claude Code 插件市场：
+请帮我安装这个 Claude Code 插件市场中的全部插件：
 https://github.com/ZaunEkko/claude-plugins
-
-目标插件：commit-commands@zaunekko
 
 要求：
 1. 先确认我要使用 user、project 还是 local scope；如果我已经明确说明，就不要重复询问。
 2. 只修改我选择的 scope，不要改动其他 scope 的插件设置。
-3. 添加并更新 zaunekko marketplace，然后安装并启用目标插件。
+3. 添加并更新 zaunekko marketplace，读取当前市场清单，然后安装并启用其中的全部插件。
 4. 如果同一 scope 已启用 commit-commands@claude-plugins-official，先说明命名空间冲突，再禁用官方版本；不要卸载或删除它。
-5. 完成后在当前会话运行 /reload-plugins，并汇报实际执行的命令与结果。
-6. 遇到权限、认证或安全确认时停下来让我决定，不要绕过确认。
+5. 对 ekko-image-gen，检查 `~/.claude/ekko-image-gen.local.json`。缺失时创建一个只包含 `baseUrl` 与占位 `apiKey` 的配置模板，并提示我直接在本机文件中填写；不要要求我把真实 API Key 粘贴到对话里。模型和多图能力使用插件默认值与运行时自动适配，除非我明确要求高级覆盖。
+6. 完成后在当前会话运行 /reload-plugins，并汇报实际执行的命令、安装结果和仍需我填写的配置。
+7. 遇到权限、认证或安全确认时停下来让我决定，不要绕过确认。
 ```
 
 ### 使用 CLI
@@ -91,6 +91,7 @@ claude plugin marketplace update zaunekko
 
 ```bash
 claude plugin install commit-commands@zaunekko --scope user
+claude plugin install ekko-image-gen@zaunekko --scope user
 ```
 
 如果同一作用域已经启用官方版本，请先禁用官方分发，再启用本版本：
@@ -111,9 +112,28 @@ claude plugin enable commit-commands@zaunekko --scope user
 ```bash
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
+claude plugin update ekko-image-gen@zaunekko --scope user
 ```
 
-#### 3. 选择作用域
+#### 3. 配置 `ekko-image-gen`
+
+创建用户级配置：
+
+- Windows：`%USERPROFILE%\.claude\ekko-image-gen.local.json`
+- macOS / Linux：`~/.claude/ekko-image-gen.local.json`
+
+普通用户只需填写 endpoint 和密钥：
+
+```json
+{
+  "baseUrl": "https://your-openai-compatible-service.example/v1",
+  "apiKey": "replace-with-local-key"
+}
+```
+
+`baseUrl` 可以指向 localhost 或第三方 HTTPS 服务。不要把真实 API Key 提交到 Git，也不要粘贴进 Agent 对话。模型默认使用 `gpt-image-2`；多图短返回由 runner 自动补齐。高级模型 fallback、尺寸和并发配置见 [`ekko-image-gen` 使用指南](docs/ekko-image-gen/README.md)。
+
+#### 4. 选择作用域
 
 | 作用域 | 适合场景 | 设置位置 |
 |---|---|---|
@@ -125,14 +145,14 @@ claude plugin update commit-commands@zaunekko --scope user
 
 ## 🎯 使用方式
 
-安装 `commit-commands@zaunekko` 后，可使用：
+安装市场插件后，可使用：
 
 | 命令 | 作用 |
 |---|---|
 | `/commit-commands:commit` | 检查改动、暂存相关文件并创建一个 commit。 |
 | `/commit-commands:commit-push-pr` | 按顺序 commit、push 并创建 Pull Request。 |
 | `/commit-commands:clean_gone` | 先显示确定性计划并请求确认，再安全清理上游已消失、提交仍被保留的分支及干净 worktree。 |
-| `/ekko-image-gen:generate` | 调用本地图片服务完成文生图或图生图，并按当前项目上下文保存、展示和验收图片。 |
+| `/ekko-image-gen:generate` | 调用用户配置的 OpenAI-compatible Images API 完成文生图或图生图，并按当前项目上下文保存、展示和验收图片。 |
 
 生成的 attribution 形如：
 
