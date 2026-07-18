@@ -170,12 +170,14 @@ export function normalizeBaseUrl(value) {
 }
 
 function mergeEnvironment(fileConfig, env) {
+  const environmentModels = nonEmptyString(env.EKKO_IMAGE_GEN_MODELS);
+  const environmentModel = nonEmptyString(env.EKKO_IMAGE_GEN_MODEL);
   return {
     ...fileConfig,
     baseUrl: env.EKKO_IMAGE_GEN_BASE_URL ?? fileConfig.baseUrl,
     apiKey: env.EKKO_IMAGE_GEN_API_KEY ?? fileConfig.apiKey,
-    models: env.EKKO_IMAGE_GEN_MODELS ?? fileConfig.models,
-    model: env.EKKO_IMAGE_GEN_MODEL ?? fileConfig.model,
+    models: environmentModels ?? (environmentModel ? undefined : fileConfig.models),
+    model: environmentModel ?? fileConfig.model,
     size: env.EKKO_IMAGE_GEN_SIZE ?? fileConfig.size,
     aspectRatio: env.EKKO_IMAGE_GEN_ASPECT_RATIO ?? fileConfig.aspectRatio,
     resolution: env.EKKO_IMAGE_GEN_RESOLUTION ?? fileConfig.resolution,

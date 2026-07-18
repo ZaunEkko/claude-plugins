@@ -124,6 +124,34 @@ test("loads user config and applies environment overrides", async (t) => {
   assert.deepEqual(loaded.models, ["gpt-image-2"]);
 });
 
+test("lets a single-model environment override replace a persisted model list", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = path.join(directory, "config.json");
+  await fs.writeFile(configPath, JSON.stringify({
+    baseUrl: "https://images.example.test/v1",
+    apiKey: "file-key",
+    models: ["persisted-primary", "persisted-fallback"],
+  }));
+
+  const loaded = await loadConfig({
+    configPath,
+    homeDir: directory,
+    env: { EKKO_IMAGE_GEN_MODEL: "temporary-model" },
+  });
+
+  assert.deepEqual(loaded.models, ["temporary-model"]);
+
+  const pluralLoaded = await loadConfig({
+    configPath,
+    homeDir: directory,
+    env: {
+      EKKO_IMAGE_GEN_MODELS: "temporary-primary,temporary-fallback",
+      EKKO_IMAGE_GEN_MODEL: "ignored-single-model",
+    },
+  });
+  assert.deepEqual(pluralLoaded.models, ["temporary-primary", "temporary-fallback"]);
+});
+
 test("uses public defaults when configuration contains only endpoint and key", async (t) => {
   const directory = await temporaryDirectory(t);
   const configPath = path.join(directory, "config.json");

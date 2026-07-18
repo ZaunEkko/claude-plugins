@@ -8,7 +8,7 @@ Read configuration from the first available source:
 2. the JSON file named by `EKKO_IMAGE_GEN_CONFIG`;
 3. `~/.claude/ekko-image-gen.local.json`.
 
-Environment values override JSON values. Keep the API key outside the plugin repository. A normal installation only needs:
+Environment values override JSON values. A non-empty `EKKO_IMAGE_GEN_MODEL` temporarily replaces a persisted `models` list when `EKKO_IMAGE_GEN_MODELS` is not set. Keep the API key outside the plugin repository. A normal installation only needs:
 
 ```json
 {
