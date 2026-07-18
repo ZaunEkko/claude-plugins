@@ -79,6 +79,13 @@ function successResponse(response, extra = {}) {
 test("normalizes service and output names", () => {
   assert.equal(normalizeBaseUrl("http://localhost:3050"), "http://localhost:3050/v1");
   assert.equal(normalizeBaseUrl("http://localhost:3050/v1/"), "http://localhost:3050/v1");
+  assert.equal(normalizeBaseUrl("http://127.0.0.1:3050/v1"), "http://127.0.0.1:3050/v1");
+  assert.equal(normalizeBaseUrl("http://[::1]:3050/v1"), "http://[::1]:3050/v1");
+  assert.equal(normalizeBaseUrl("https://images.example.test/v1"), "https://images.example.test/v1");
+  assert.throws(
+    () => normalizeBaseUrl("http://images.example.test/v1"),
+    /must use HTTPS unless the host is localhost or loopback/u,
+  );
   assert.equal(sanitizeBaseName(" 角色：头像 / 一号 "), "角色-头像-一号");
 });
 
@@ -233,6 +240,33 @@ test("generates an image, saves it without overwriting, and returns clickable UR
   assert.notEqual(first.jobs[0].files[0].path, second.jobs[0].files[0].path);
 });
 
+test("keeps request timeouts active while reading response bodies", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const baseUrl = await startServer(t, async (request, response) => {
+    await readBody(request);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.flushHeaders();
+    response.write('{"data":[');
+  });
+  const startedAt = Date.now();
+
+  const result = await runJobs({
+    id: "stalled-response",
+    prompt: "A response that never finishes",
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      timeoutMs: 5000,
+      maxRetries: 0,
+    }),
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.jobs[0].error.code, "request_timeout");
+  assert.ok(Date.now() - startedAt < 7000);
+});
+
 test("sends the provider history extension only when explicitly requested", async (t) => {
   const directory = await temporaryDirectory(t);
   let requestBody = null;
@@ -253,6 +287,49 @@ test("sends the provider history extension only when explicitly requested", asyn
 
   assert.equal(result.status, "ok");
   assert.equal(requestBody.history_disabled, true);
+});
+
+test("rejects successful responses with non-image base64 or URL payloads", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const invalidBase64 = Buffer.from("not an image", "utf8").toString("base64");
+  const baseUrl = await startServer(t, async (request, response) => {
+    if (request.url === "/generated.txt") {
+      response.writeHead(200, { "Content-Type": "text/plain" });
+      response.end("not an image");
+      return;
+    }
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    const data = body.prompt === "bad-base64"
+      ? [{ b64_json: invalidBase64 }]
+      : [{ url: `http://${request.headers.host}/generated.txt` }];
+    successResponse(response, { data });
+  });
+
+  const result = await runJobs({
+    concurrency: 2,
+    jobs: [
+      {
+        id: "bad-base64",
+        prompt: "bad-base64",
+        outputDir: path.join(directory, "base64-output"),
+      },
+      {
+        id: "bad-url",
+        prompt: "bad-url",
+        outputDir: path.join(directory, "url-output"),
+      },
+    ],
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime")),
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.summary.failed, 2);
+  assert.deepEqual(result.jobs.map((job) => job.error.code), [
+    "invalid_response",
+    "invalid_response",
+  ]);
 });
 
 test("uploads local reference images with multipart form data", async (t) => {

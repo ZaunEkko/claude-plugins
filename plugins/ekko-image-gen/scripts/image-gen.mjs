@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -149,6 +150,17 @@ export function resolveSize(value = {}, fallback = DEFAULT_CONFIG.size, field = 
   return { ...dimensions, aspectRatio, resolution, preset: key };
 }
 
+function isLoopbackHostname(value) {
+  const hostname = value
+    .replace(/^\[|\]$/gu, "")
+    .replace(/\.$/u, "")
+    .toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "::1") {
+    return true;
+  }
+  return isIP(hostname) === 4 && hostname.split(".")[0] === "127";
+}
+
 export function normalizeBaseUrl(value) {
   const raw = nonEmptyString(value) ?? DEFAULT_CONFIG.baseUrl;
   let parsed;
@@ -159,6 +171,11 @@ export function normalizeBaseUrl(value) {
   }
   if (!new Set(["http:", "https:"]).has(parsed.protocol)) {
     throw new ImageGenError("baseUrl must use HTTP or HTTPS", { code: "invalid_config" });
+  }
+  if (parsed.protocol === "http:" && !isLoopbackHostname(parsed.hostname)) {
+    throw new ImageGenError("baseUrl must use HTTPS unless the host is localhost or loopback", {
+      code: "invalid_config",
+    });
   }
   parsed.search = "";
   parsed.hash = "";
@@ -498,15 +515,23 @@ function extensionForMime(mime) {
   ]).get(mime) ?? ".png";
 }
 
-function contentType(value) {
-  return nonEmptyString(value)?.split(";", 1)[0].toLowerCase() ?? null;
-}
-
-async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
+async function fetchWithTimeout(fetchImpl, url, options, timeoutMs, consumeResponse) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("request timeout")), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
-    return await fetchImpl(url, { ...options, signal: controller.signal });
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    return await consumeResponse(response);
+  } catch (error) {
+    if (timedOut) {
+      throw new ImageGenError("Request timed out while receiving the response", {
+        code: "request_timeout",
+      });
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -564,17 +589,24 @@ async function loadImageBytes(image, config, fetchImpl, cwd) {
     bytes = Buffer.from(match[2], "base64");
     sourceName ??= `reference${extensionForMime(match[1].toLowerCase())}`;
   } else if (/^https?:\/\//iu.test(source)) {
-    const response = await fetchWithTimeout(fetchImpl, source, {}, config.timeoutMs);
-    if (!response.ok) {
-      throw new ImageGenError(`Reference image download failed with HTTP ${response.status}`, {
-        code: "image_download_failed",
-        status: response.status,
-      });
-    }
-    bytes = await readResponseBytes(
-      response,
-      config.maxInputBytes,
-      "Reference image exceeds maxInputBytes",
+    bytes = await fetchWithTimeout(
+      fetchImpl,
+      source,
+      {},
+      config.timeoutMs,
+      async (response) => {
+        if (!response.ok) {
+          throw new ImageGenError(`Reference image download failed with HTTP ${response.status}`, {
+            code: "image_download_failed",
+            status: response.status,
+          });
+        }
+        return readResponseBytes(
+          response,
+          config.maxInputBytes,
+          "Reference image exceeds maxInputBytes",
+        );
+      },
     );
     if (!sourceName) {
       const parsed = new URL(source);
@@ -711,7 +743,7 @@ async function callApi(endpoint, buildRequest, config, fetchImpl) {
     const release = await acquireGlobalSlot(config);
     try {
       const request = buildRequest();
-      const response = await fetchWithTimeout(
+      const { response, body } = await fetchWithTimeout(
         fetchImpl,
         url,
         {
@@ -723,8 +755,8 @@ async function callApi(endpoint, buildRequest, config, fetchImpl) {
           },
         },
         config.timeoutMs,
+        async (response) => ({ response, body: await parseResponse(response) }),
       );
-      const body = await parseResponse(response);
       if (response.ok) {
         return body;
       }
@@ -806,30 +838,43 @@ async function requestImageChunk(job, inputs, mode, model, count, config, fetchI
       );
 }
 
+function validatedResponseImage(bytes, message) {
+  const mime = detectImageMime(bytes);
+  if (!mime) {
+    throw new ImageGenError(message, { code: "invalid_response" });
+  }
+  return { bytes, mime };
+}
+
 async function responseItemBytes(item, config, fetchImpl) {
   if (nonEmptyString(item?.b64_json)) {
     const raw = item.b64_json.replace(/^data:[^;,]+;base64,/iu, "");
     const bytes = Buffer.from(raw, "base64");
-    if (bytes.length === 0) {
-      throw new ImageGenError("Image service returned an empty base64 image", {
-        code: "invalid_response",
-      });
-    }
-    return { bytes, mime: detectImageMime(bytes) ?? "image/png" };
+    return validatedResponseImage(
+      bytes,
+      "Image service returned base64 data that is not a supported image",
+    );
   }
   if (nonEmptyString(item?.url)) {
-    const response = await fetchWithTimeout(fetchImpl, item.url, {}, config.timeoutMs);
-    if (!response.ok) {
-      throw new ImageGenError(`Generated image download failed with HTTP ${response.status}`, {
-        code: "image_download_failed",
-        status: response.status,
-      });
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    return {
-      bytes,
-      mime: detectImageMime(bytes) ?? contentType(response.headers.get("content-type")) ?? "image/png",
-    };
+    return fetchWithTimeout(
+      fetchImpl,
+      item.url,
+      {},
+      config.timeoutMs,
+      async (response) => {
+        if (!response.ok) {
+          throw new ImageGenError(`Generated image download failed with HTTP ${response.status}`, {
+            code: "image_download_failed",
+            status: response.status,
+          });
+        }
+        const bytes = Buffer.from(await response.arrayBuffer());
+        return validatedResponseImage(
+          bytes,
+          "Generated image URL returned data that is not a supported image",
+        );
+      },
+    );
   }
   throw new ImageGenError("Image response contains neither b64_json nor url", {
     code: "invalid_response",

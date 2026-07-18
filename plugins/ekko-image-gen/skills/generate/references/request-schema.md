@@ -8,7 +8,7 @@ Read configuration from the first available source:
 2. the JSON file named by `EKKO_IMAGE_GEN_CONFIG`;
 3. `~/.claude/ekko-image-gen.local.json`.
 
-Environment values override JSON values. A non-empty `EKKO_IMAGE_GEN_MODEL` temporarily replaces a persisted `models` list when `EKKO_IMAGE_GEN_MODELS` is not set. Keep the API key outside the plugin repository. A normal installation only needs:
+Environment values override JSON values. A non-empty `EKKO_IMAGE_GEN_MODEL` temporarily replaces a persisted `models` list when `EKKO_IMAGE_GEN_MODELS` is not set. Plain HTTP API endpoints are accepted only for `localhost` or loopback hosts; non-local services must use HTTPS. Keep the API key outside the plugin repository. A normal installation only needs:
 
 ```json
 {
@@ -134,6 +134,8 @@ The API may accept a requested tier while returning different actual pixel dimen
 - A single edit reference uses the established `image` compatibility field; multiple references use repeated OpenAI-compatible `image[]` fields.
 - Remote references are downloaded by the Claude Code host and uploaded as files. This makes host-local URLs usable even when the API runs inside a container.
 - The standard request omits the legacy `response_format` field. GPT Image models return `b64_json` by default, and the runner also supports API responses containing an image URL.
+- `timeoutMs` remains active through response-body consumption, not only until headers arrive.
+- Generated base64 and URL payloads must decode to PNG, JPEG, GIF, WebP, or BMP bytes before any output file is written.
 
 ## Concurrency
 

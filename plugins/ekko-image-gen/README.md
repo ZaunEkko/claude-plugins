@@ -65,7 +65,7 @@ plugins/ekko-image-gen/
 }
 ```
 
-普通用户只需填写 `baseUrl` 和 `apiKey`。`baseUrl` 可以是 localhost，也可以是第三方 HTTPS endpoint。配置每次调用时重新读取，不需要重启 Claude Code；环境变量可以覆盖 JSON。模型、尺寸、并发和 provider 能力都有可用默认值，完整高级字段见 `skills/generate/references/request-schema.md`。
+普通用户只需填写 `baseUrl` 和 `apiKey`。`baseUrl` 可以是 localhost，也可以是第三方 HTTPS endpoint；明文 HTTP 只允许 `localhost` 或 loopback 地址，避免把 API Key、提示词和参考图片发送到非本地明文连接。配置每次调用时重新读取，不需要重启 Claude Code；环境变量可以覆盖 JSON。模型、尺寸、并发和 provider 能力都有可用默认值，完整高级字段见 `skills/generate/references/request-schema.md`。
 
 `maxImagesPerRequest` 是可选的服务商单次请求能力上限，默认 `4`，有效范围 `1-4`。即使不配置，runner 发现上游短返回时也会根据实际 `data.length` 自动安排有界 follow-up，只补齐原始逻辑 `count`；已知服务能力时可以显式设置该字段减少一次探测请求。
 
