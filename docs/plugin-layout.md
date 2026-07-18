@@ -48,6 +48,7 @@ plugins/<plugin-name>/.claude-plugin/plugin.json
 当前活动 marketplace manifest：
 
 - `plugins/commit-commands/.claude-plugin/plugin.json`
+- `plugins/ekko-image-gen/.claude-plugin/plugin.json`
 
 `plugins/ekko-plugin-scaffold/.claude-plugin/plugin.json` 仅作为未上架的历史布局示例保留，不属于活动目录，也不是受支持的安装目标。
 
@@ -86,6 +87,22 @@ plugins/commit-commands/
 ```
 
 该目录整体使用 Apache License 2.0。目录外的原创仓库内容默认使用根 MIT License。
+
+## `ekko-image-gen` 结构
+
+```text
+plugins/ekko-image-gen/
+├── .claude-plugin/plugin.json
+├── agents/image-worker.md
+├── skills/generate/
+│   ├── SKILL.md
+│   └── references/
+├── scripts/image-gen.mjs
+├── tests/image-gen.test.mjs
+└── README.md
+```
+
+该插件只暴露一个用户技能命令。主代理负责上下文感知规划和最终图片验收；没有 `Agent` 工具的叶子 worker 负责受控并发生成；Node.js runner 负责认证、API 路由、multipart 上传、并发槽与文件落盘。
 
 ## 文档分层
 

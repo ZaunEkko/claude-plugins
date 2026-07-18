@@ -11,6 +11,7 @@ import {
   captureSessionEnd,
   captureSessionStart,
 } from "../scripts/capture-session-model.mjs";
+import { withGitBashPath } from "./helpers/test-environment.mjs";
 
 const pluginRoot = path.resolve(import.meta.dirname, "..");
 const wrapper = path.join(pluginRoot, "scripts", "commit-with-dynamic-attribution.sh");
@@ -23,9 +24,11 @@ const generatedMarkers = [
 ];
 
 function run(command, args, options = {}) {
+  const environment = command === "bash" ? withGitBashPath(options.env) : options.env;
   return spawnSync(command, args, {
     encoding: "utf8",
     ...options,
+    ...(environment ? { env: environment } : {}),
   });
 }
 

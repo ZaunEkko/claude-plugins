@@ -1,0 +1,20 @@
+{
+  "name": "ekko-image-gen",
+  "version": "0.1.11",
+  "description": "Context-aware OpenAI-compatible image generation for Claude Code with text-to-image, reference-image editing, parallel worker agents, visual review, and clickable local outputs.",
+  "author": {
+    "name": "ZaunEkko",
+    "url": "https://github.com/ZaunEkko"
+  },
+  "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/ekko-image-gen",
+  "repository": "https://github.com/ZaunEkko/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "image-generation",
+    "text-to-image",
+    "image-editing",
+    "claude-code",
+    "local-api",
+    "multi-agent"
+  ]
+}
