@@ -37,6 +37,7 @@
 | 外掛 | 狀態 | 說明 | 文件 |
 |---|---|---|---|
 | `commit-commands` | 可用 · 相容分發 | 保留三個官方命令名稱，將目前工作階段模型與可用 effort 寫入 Git commit attribution，並阻止 Claude Code 直接 commit 繞過 wrapper。 | [使用指南](docs/commit-commands/README.md) · [實作與上游說明](../../plugins/commit-commands/README.md) |
+| `ekko-image-gen` | 本機可用 · 原創 | 以單一命令完成本機文生圖、貼上參考圖後的圖生圖、專案感知輸出、受控葉子 worker、視覺驗收與可點擊本機檔案。 | [使用指南](../../docs/ekko-image-gen/README.md) · [實作說明](../../plugins/ekko-image-gen/README.md) |
 
 `commit-commands` 與官方分發使用相同命名空間；同一 scope 只能啟用其中一個。
 

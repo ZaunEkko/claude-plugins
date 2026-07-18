@@ -16,6 +16,17 @@
       },
       "category": "Development",
       "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/commit-commands"
+    },
+    {
+      "name": "ekko-image-gen",
+      "source": "./plugins/ekko-image-gen",
+      "description": "Context-aware local image generation with one command for text-to-image, pasted-image editing, bounded parallel workers, parent-agent visual review, and clickable local outputs.",
+      "author": {
+        "name": "ZaunEkko",
+        "url": "https://github.com/ZaunEkko"
+      },
+      "category": "Productivity",
+      "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/ekko-image-gen"
     }
   ]
 }

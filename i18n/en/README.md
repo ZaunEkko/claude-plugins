@@ -37,6 +37,7 @@ Original plugins normally use the purpose-first name `ekko-<specific-purpose>`. 
 | Plugin | Status | Description | Documentation |
 |---|---|---|---|
 | `commit-commands` | Available · compatibility distribution | Preserves the three official command names, writes the current session model plus optional effort into Git commit attribution, and blocks direct commits from bypassing the wrapper inside Claude Code. | [User guide](docs/commit-commands/README.md) · [Implementation and upstream notes](../../plugins/commit-commands/README.md) |
+| `ekko-image-gen` | Local · original | One command for local text-to-image, pasted-reference image editing, context-aware project output, bounded leaf workers, visual review, and clickable local files. | [User guide](../../docs/ekko-image-gen/README.md) · [Implementation](../../plugins/ekko-image-gen/README.md) |
 
 `commit-commands` exposes the same namespace as the official distribution. Enable exactly one version in any given scope.
 

@@ -11,6 +11,7 @@ import {
   captureSessionEnd,
   captureSessionStart,
 } from "../scripts/capture-session-model.mjs";
+import { withGitBashPath } from "./helpers/test-environment.mjs";
 
 const pluginRoot = path.resolve(import.meta.dirname, "..");
 const wrapper = path.join(pluginRoot, "scripts", "commit-with-dynamic-attribution.sh");
@@ -69,7 +70,7 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
 
   fs.appendFileSync(path.join(repository, "file.txt"), "changed\n");
   git(repository, "add", "file.txt");
-  const environment = {
+  const environment = withGitBashPath({
     ...process.env,
     CLAUDE_PLUGIN_ROOT: pluginRoot,
     CLAUDE_COMMIT_COMMANDS_NODE: process.execPath,
@@ -79,7 +80,7 @@ test("commit-push-pr uses the shared wrapper before local push and stubbed PR cr
     TEMP: toBashPath(messages),
     TMP: toBashPath(messages),
     TMPDIR: toBashPath(messages),
-  };
+  });
 
   const commit = spawnSync("bash", [wrapper], {
     cwd: repository,

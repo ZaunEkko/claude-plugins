@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added `ekko-image-gen@zaunekko`, a local-service image generation plugin with one skill command for text-to-image and pasted-reference image editing.
+- Added context-aware output placement, clickable local file and directory links, direct Claude Code image inspection, bounded parallel leaf workers, parent-agent visual acceptance, and targeted retries.
+- Added a dependency-free Node.js runner with JSON/multipart routing, remote-reference host download, collision-safe writes, API-key redaction, partial-success reporting, and a cross-process global concurrency semaphore.
+- Added preferred model fallback (`plus-codex-gpt-image-2` → `codex-gpt-image-2` → `gpt-image-2`), UI-derived aspect-ratio and 1K/2K/4K presets, and actual output-dimension reporting when upstream pixels differ from the requested tier.
+- Added isolated tests for generation, image editing, configuration overrides, output links, collision handling, model fallback, size presets, concurrency limiting, partial success, and secret redaction.
+
+### Fixed
+
+- Fixed Windows `commit-commands` wrapper tests to prefer Git Bash from the active Git installation instead of the WSL `bash.exe` shim, while preserving the literal subprocess calls introduced by CodeQL hardening.
+
 ## 2.0.3 - 2026-07-17
 
 ### Added

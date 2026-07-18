@@ -41,6 +41,7 @@
 | 插件 | 状态 | 说明 | 文档 |
 |---|---|---|---|
 | `commit-commands` | 可用 · 兼容分发 | 基于 Anthropic 官方同名插件，保留三个命令，提供当前会话模型 attribution、Bash 与已知 Playwright unsafe 提交防绕过保护、显式 detached session 绑定，以及确认式安全分支/worktree 清理。 | [使用指南](docs/commit-commands/README.md) · [实现与上游说明](plugins/commit-commands/README.md) |
+| `ekko-image-gen` | 本地可用 · 原创 | 使用一个命令调用本地图片服务，支持文生图、粘贴图片后的图生图、项目上下文感知落盘、受控并发叶子 worker、主代理视觉验收和可点击本地输出。 | [使用指南](docs/ekko-image-gen/README.md) · [实现说明](plugins/ekko-image-gen/README.md) |
 
 `commit-commands` 与官方分发暴露相同命名空间。请在同一作用域内只启用一个版本。
 
@@ -131,6 +132,7 @@ claude plugin update commit-commands@zaunekko --scope user
 | `/commit-commands:commit` | 检查改动、暂存相关文件并创建一个 commit。 |
 | `/commit-commands:commit-push-pr` | 按顺序 commit、push 并创建 Pull Request。 |
 | `/commit-commands:clean_gone` | 先显示确定性计划并请求确认，再安全清理上游已消失、提交仍被保留的分支及干净 worktree。 |
+| `/ekko-image-gen:generate` | 调用本地图片服务完成文生图或图生图，并按当前项目上下文保存、展示和验收图片。 |
 
 生成的 attribution 形如：
 
@@ -153,6 +155,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [故障排查](docs/troubleshooting.md)
 - [`commit-commands` 使用指南](docs/commit-commands/README.md)
 - [`commit-commands` 实现、测试与上游同步](plugins/commit-commands/README.md)
+- [`ekko-image-gen` 使用指南](docs/ekko-image-gen/README.md)
+- [`ekko-image-gen` 实现、配置与测试](plugins/ekko-image-gen/README.md)
 - [贡献指南](CONTRIBUTING.md)
 - [支持渠道](SUPPORT.md)
 
@@ -169,7 +173,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ├── docs/
 ├── i18n/
 ├── plugins/
-│   └── commit-commands/
+│   ├── commit-commands/
+│   └── ekko-image-gen/
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 └── README.md
@@ -192,11 +197,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 python -m pip install PyYAML==6.0.3
 python .github/validate-repository.py
 bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
-node --test plugins/commit-commands/tests/*.mjs
+node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs
 claude plugin validate .
 claude plugin validate . --strict
 claude plugin validate plugins/commit-commands
 claude plugin validate plugins/commit-commands --strict
+claude plugin validate plugins/ekko-image-gen
+claude plugin validate plugins/ekko-image-gen --strict
 ```
 
 `--strict` 会把验证警告视为错误，适合在 Pull Request 与发布前使用。

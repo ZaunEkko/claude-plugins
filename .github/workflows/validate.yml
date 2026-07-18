@@ -56,7 +56,7 @@ jobs:
         run: bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
 
       - name: Run complete Node test suite
-        run: node --test plugins/commit-commands/tests/*.mjs
+        run: node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs
 
       - name: Validate marketplace and active plugins
         shell: bash
@@ -106,4 +106,4 @@ jobs:
         run: test "$(node --version)" = "v${NODE_VERSION}"
 
       - name: Run cross-platform commit-commands tests
-        run: node --test plugins/commit-commands/tests/test_clean_gone.mjs plugins/commit-commands/tests/test_direct_git_commit_guard.mjs
+        run: node --test plugins/commit-commands/tests/test_clean_gone.mjs plugins/commit-commands/tests/test_commit_push_pr_flow.mjs plugins/commit-commands/tests/test_commit_wrapper.mjs plugins/commit-commands/tests/test_direct_git_commit_guard.mjs
