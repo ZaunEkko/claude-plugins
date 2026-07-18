@@ -114,8 +114,8 @@ The runner validates uploaded bytes as PNG, JPEG, GIF, WebP, or BMP and refuses 
 | `1:1` / `1k` | `1024x1024` |
 | `2:3` / `1k` | `1024x1536` |
 | `3:2` / `1k` | `1536x1024` |
-| `3:4` / `1k` | `1024x1365` |
-| `4:3` / `1k` | `1365x1024` |
+| `3:4` / `1k` | `1024x1360` |
+| `4:3` / `1k` | `1360x1024` |
 | `9:16` / `1k` | `1088x1920` |
 | `16:9` / `1k` | `1920x1088` |
 | `1:1` / `2k` | `2048x2048` |
@@ -131,6 +131,7 @@ The API may accept a requested tier while returning different actual pixel dimen
 
 - Jobs without references call `POST <baseUrl>/images/generations` with JSON.
 - Jobs with references call `POST <baseUrl>/images/edits` with multipart uploads.
+- A single edit reference uses the established `image` compatibility field; multiple references use repeated OpenAI-compatible `image[]` fields.
 - Remote references are downloaded by the Claude Code host and uploaded as files. This makes host-local URLs usable even when the API runs inside a container.
 - The standard request omits the legacy `response_format` field. GPT Image models return `b64_json` by default, and the runner also supports API responses containing an image URL.
 

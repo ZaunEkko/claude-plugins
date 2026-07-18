@@ -14,8 +14,8 @@ const SIZE_PRESETS = Object.freeze({
   "1:1@1k": "1024x1024",
   "2:3@1k": "1024x1536",
   "3:2@1k": "1536x1024",
-  "3:4@1k": "1024x1365",
-  "4:3@1k": "1365x1024",
+  "3:4@1k": "1024x1360",
+  "4:3@1k": "1360x1024",
   "9:16@1k": "1088x1920",
   "16:9@1k": "1920x1088",
   "1:1@2k": "2048x2048",
@@ -778,8 +778,9 @@ function editBody(job, inputs, model, count) {
   form.append("n", String(count));
   form.append("size", job.size);
   form.append("quality", job.quality);
+  const imageField = inputs.length > 1 ? "image[]" : "image";
   for (const input of inputs) {
-    form.append("image", new Blob([input.bytes], { type: input.mime }), input.name);
+    form.append(imageField, new Blob([input.bytes], { type: input.mime }), input.name);
   }
   return form;
 }

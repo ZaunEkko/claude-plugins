@@ -15,10 +15,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Bumped `ekko-image-gen` to `0.1.3` so user-scope version-cached installations receive multi-image auto-adaptation, the standard GPT Image request shape, streamed reference limits, and public marketplace documentation.
+- Bumped `ekko-image-gen` to `0.1.4` so user-scope version-cached installations receive multi-image auto-adaptation, the standard GPT Image request shape, streamed reference limits, official multi-reference multipart fields, 16-aligned presets, and public marketplace documentation.
 
 ### Fixed
 
+- Sent multiple edit references through repeated `image[]` multipart fields while preserving the established single-reference `image` compatibility path.
+- Changed the `3:4` and `4:3` 1K presets to `1024x1360` and `1360x1024`, keeping both dimensions divisible by 16 for GPT Image 2 compatibility.
 - Omitted the legacy `response_format` field from standard GPT Image generation and edit requests while retaining support for both `b64_json` and URL responses.
 - Enforced `maxInputBytes` while streaming chunked remote reference images, aborting before an oversized response can be fully buffered in memory.
 - Fixed Windows `commit-commands` wrapper tests to prefer Git Bash from the active Git installation instead of the WSL `bash.exe` shim, while preserving the literal subprocess calls introduced by CodeQL hardening.

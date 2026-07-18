@@ -47,6 +47,7 @@ plugins/ekko-image-gen/
 - `gpt-image-2`：文生图与 multipart 图生图成功
 - 可配置的模型 fallback；较早的兼容服务也验证过 `plus-codex-gpt-image-2` 与 `codex-gpt-image-2`
 - 逻辑 `n` / `count` 范围 `1-4`；可按高级 provider cap 或真实短返回自动拆成串行上游请求
+- 多参考图使用 OpenAI 文档约定的重复 `image[]` multipart 字段；单参考图保留已验证的 `image` 兼容路径
 - GPT Image 默认返回 `b64_json`；runner 也可处理服务返回的 HTTP(S) 图片 URL，标准请求不发送旧式 `response_format`
 
 仓库默认模型为 `gpt-image-2`，普通用户无需填写 `models`。模型名称由服务商定义；只有目标 endpoint 不暴露默认模型或需要多级 fallback 时，才使用高级 `models` 配置。runner 只对上游、限流、可用性或模型相关错误执行模型回退；认证、内容或普通参数错误不会被掩盖。

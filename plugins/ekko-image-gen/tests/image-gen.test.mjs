@@ -93,6 +93,8 @@ test("resolves the image UI aspect-ratio and resolution presets", () => {
   });
   assert.equal(resolveSize("16:9(4k)").size, "3840x2160");
   assert.equal(resolveSize({ size: "9:16", resolution: "2k" }).size, "1440x2560");
+  assert.equal(resolveSize({ aspectRatio: "3:4", resolution: "1k" }).size, "1024x1360");
+  assert.equal(resolveSize({ aspectRatio: "4:3", resolution: "1k" }).size, "1360x1024");
   assert.throws(() => resolveSize({ aspectRatio: "2:3", resolution: "4k" }), /not exposed/u);
   assert.deepEqual(imageDimensions(PNG_BYTES), { width: 1, height: 1 });
 });
@@ -255,6 +257,36 @@ test("uploads local reference images with multipart form data", async (t) => {
   assert.match(multipartBody, /name="prompt"/u);
   assert.match(multipartBody, /Turn it red/u);
   assert.doesNotMatch(multipartBody, /name="response_format"/u);
+});
+
+test("uploads multiple references with multipart array fields", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const firstReference = path.join(directory, "first-reference.png");
+  const secondReference = path.join(directory, "second-reference.png");
+  await Promise.all([
+    fs.writeFile(firstReference, PNG_BYTES),
+    fs.writeFile(secondReference, PNG_BYTES),
+  ]);
+  let multipartBody = null;
+  const baseUrl = await startServer(t, async (request, response) => {
+    multipartBody = (await readBody(request)).toString("latin1");
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "multi-reference-edit",
+    prompt: "Combine both references",
+    images: [firstReference, secondReference],
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime")),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.match(multipartBody, /name="image\[\]"; filename="first-reference.png"/u);
+  assert.match(multipartBody, /name="image\[\]"; filename="second-reference.png"/u);
+  assert.doesNotMatch(multipartBody, /name="image"; filename=/u);
 });
 
 test("stops chunked remote references at maxInputBytes", async (t) => {
