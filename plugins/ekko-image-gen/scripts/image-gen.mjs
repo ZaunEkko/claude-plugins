@@ -214,29 +214,34 @@ export function normalizeBaseUrl(value) {
 }
 
 function mergeEnvironment(fileConfig, env) {
+  const override = (name, fallback) => nonEmptyString(env[name]) ?? fallback;
   const environmentModels = nonEmptyString(env.EKKO_IMAGE_GEN_MODELS);
   const environmentModel = nonEmptyString(env.EKKO_IMAGE_GEN_MODEL);
   return {
     ...fileConfig,
-    baseUrl: env.EKKO_IMAGE_GEN_BASE_URL ?? fileConfig.baseUrl,
-    apiKey: env.EKKO_IMAGE_GEN_API_KEY ?? fileConfig.apiKey,
+    baseUrl: override("EKKO_IMAGE_GEN_BASE_URL", fileConfig.baseUrl),
+    apiKey: override("EKKO_IMAGE_GEN_API_KEY", fileConfig.apiKey),
     models: environmentModels ?? (environmentModel ? undefined : fileConfig.models),
     model: environmentModel ?? fileConfig.model,
-    size: env.EKKO_IMAGE_GEN_SIZE ?? fileConfig.size,
-    aspectRatio: env.EKKO_IMAGE_GEN_ASPECT_RATIO ?? fileConfig.aspectRatio,
-    resolution: env.EKKO_IMAGE_GEN_RESOLUTION ?? fileConfig.resolution,
-    quality: env.EKKO_IMAGE_GEN_QUALITY ?? fileConfig.quality,
-    maxConcurrency: env.EKKO_IMAGE_GEN_MAX_CONCURRENCY ?? fileConfig.maxConcurrency,
-    maxGlobalConcurrency:
-      env.EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY ?? fileConfig.maxGlobalConcurrency,
-    maxImagesPerRequest:
-      env.EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST ?? fileConfig.maxImagesPerRequest,
-    timeoutMs: env.EKKO_IMAGE_GEN_TIMEOUT_MS ?? fileConfig.timeoutMs,
-    queueTimeoutMs: env.EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS ?? fileConfig.queueTimeoutMs,
-    maxRetries: env.EKKO_IMAGE_GEN_MAX_RETRIES ?? fileConfig.maxRetries,
-    maxInputBytes: env.EKKO_IMAGE_GEN_MAX_INPUT_BYTES ?? fileConfig.maxInputBytes,
-    maxOutputBytes: env.EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES ?? fileConfig.maxOutputBytes,
-    runtimeDir: env.EKKO_IMAGE_GEN_RUNTIME_DIR ?? fileConfig.runtimeDir,
+    size: override("EKKO_IMAGE_GEN_SIZE", fileConfig.size),
+    aspectRatio: override("EKKO_IMAGE_GEN_ASPECT_RATIO", fileConfig.aspectRatio),
+    resolution: override("EKKO_IMAGE_GEN_RESOLUTION", fileConfig.resolution),
+    quality: override("EKKO_IMAGE_GEN_QUALITY", fileConfig.quality),
+    maxConcurrency: override("EKKO_IMAGE_GEN_MAX_CONCURRENCY", fileConfig.maxConcurrency),
+    maxGlobalConcurrency: override(
+      "EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY",
+      fileConfig.maxGlobalConcurrency,
+    ),
+    maxImagesPerRequest: override(
+      "EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST",
+      fileConfig.maxImagesPerRequest,
+    ),
+    timeoutMs: override("EKKO_IMAGE_GEN_TIMEOUT_MS", fileConfig.timeoutMs),
+    queueTimeoutMs: override("EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS", fileConfig.queueTimeoutMs),
+    maxRetries: override("EKKO_IMAGE_GEN_MAX_RETRIES", fileConfig.maxRetries),
+    maxInputBytes: override("EKKO_IMAGE_GEN_MAX_INPUT_BYTES", fileConfig.maxInputBytes),
+    maxOutputBytes: override("EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES", fileConfig.maxOutputBytes),
+    runtimeDir: override("EKKO_IMAGE_GEN_RUNTIME_DIR", fileConfig.runtimeDir),
   };
 }
 
@@ -314,9 +319,10 @@ export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
 }
 
 export async function loadConfig({ env = process.env, homeDir = os.homedir(), configPath } = {}) {
+  const environmentConfigPath = nonEmptyString(env.EKKO_IMAGE_GEN_CONFIG);
   const resolvedPath = path.resolve(
     configPath ??
-      env.EKKO_IMAGE_GEN_CONFIG ??
+      environmentConfigPath ??
       path.join(homeDir, ".claude", "ekko-image-gen.local.json"),
   );
   let fileConfig = {};

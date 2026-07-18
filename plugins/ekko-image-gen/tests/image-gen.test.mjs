@@ -132,6 +132,31 @@ test("loads user config and applies environment overrides", async (t) => {
   assert.equal(loaded.maxImagesPerRequest, 1);
   assert.equal(loaded.maxOutputBytes, 2048);
   assert.deepEqual(loaded.models, ["gpt-image-2"]);
+
+  const emptyOverrideLoaded = await loadConfig({
+    configPath,
+    homeDir: directory,
+    env: {
+      EKKO_IMAGE_GEN_BASE_URL: " ",
+      EKKO_IMAGE_GEN_API_KEY: "",
+      EKKO_IMAGE_GEN_QUALITY: " ",
+      EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES: "",
+    },
+  });
+  assert.equal(emptyOverrideLoaded.baseUrl, "http://localhost:3050/v1");
+  assert.equal(emptyOverrideLoaded.apiKey, "file-key");
+  assert.equal(emptyOverrideLoaded.quality, "auto");
+  assert.equal(emptyOverrideLoaded.maxOutputBytes, 4096);
+
+  const defaultConfigDirectory = path.join(directory, ".claude");
+  await fs.mkdir(defaultConfigDirectory, { recursive: true });
+  await fs.copyFile(configPath, path.join(defaultConfigDirectory, "ekko-image-gen.local.json"));
+  const emptyConfigPathLoaded = await loadConfig({
+    homeDir: directory,
+    env: { EKKO_IMAGE_GEN_CONFIG: "" },
+  });
+  assert.equal(emptyConfigPathLoaded.apiKey, "file-key");
+  assert.equal(emptyConfigPathLoaded.maxOutputBytes, 4096);
 });
 
 test("lets a single-model environment override replace a persisted model list", async (t) => {

@@ -32,6 +32,7 @@ Use the installed user-scope cache that matches the current source version. Keep
 3. Drive a real scalar-reference edit through the installed CLI. Pass `images` as one string, confirm `mode: "edit"` and `inputCount: 1`, then inspect the generated file with `Read` for reference preservation and the requested visual change.
 4. Drive `maxOutputBytes` through the installed CLI with an isolated local mock Images API and an obviously fake environment API key. Return a generated-image URL that streams beyond the limit; capture `image_too_large`, exit code `1`, and a server close event well before the planned byte count.
 5. Probe an empty scalar reference (`images: " "`) against an unreachable loopback endpoint. Confirm `invalid_request` occurs before networking instead of silently switching to text generation.
-6. Capture CLI JSON, exit statuses, server byte counts, image paths, and visual observations inline.
+6. Probe empty `EKKO_IMAGE_GEN_BASE_URL`, `EKKO_IMAGE_GEN_API_KEY`, and `EKKO_IMAGE_GEN_CONFIG` values through the installed CLI with a temporary fake-key config and local mock endpoint. Confirm the file endpoint and key remain effective.
+7. Capture CLI JSON, exit statuses, server byte counts, image paths, and visual observations inline.
 
 Do not use real third-party endpoints for failure probes. Do not place credentials in command arguments, fixtures, logs, prompts, or repository content.
