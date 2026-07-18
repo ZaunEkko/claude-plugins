@@ -510,6 +510,43 @@ async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   }
 }
 
+async function readResponseBytes(response, maximumBytes, tooLargeMessage) {
+  const declaredLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    throw new ImageGenError(tooLargeMessage, { code: "image_too_large" });
+  }
+
+  if (!response.body || typeof response.body.getReader !== "function") {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > maximumBytes) {
+      throw new ImageGenError(tooLargeMessage, { code: "image_too_large" });
+    }
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      const chunk = Buffer.from(value);
+      totalBytes += chunk.length;
+      if (totalBytes > maximumBytes) {
+        await reader.cancel().catch(() => {});
+        throw new ImageGenError(tooLargeMessage, { code: "image_too_large" });
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, totalBytes);
+}
+
 async function loadImageBytes(image, config, fetchImpl, cwd) {
   const source = image.source;
   let bytes;
@@ -532,13 +569,11 @@ async function loadImageBytes(image, config, fetchImpl, cwd) {
         status: response.status,
       });
     }
-    const declaredLength = Number(response.headers.get("content-length") ?? 0);
-    if (declaredLength > config.maxInputBytes) {
-      throw new ImageGenError("Reference image exceeds maxInputBytes", {
-        code: "image_too_large",
-      });
-    }
-    bytes = Buffer.from(await response.arrayBuffer());
+    bytes = await readResponseBytes(
+      response,
+      config.maxInputBytes,
+      "Reference image exceeds maxInputBytes",
+    );
     if (!sourceName) {
       const parsed = new URL(source);
       sourceName = path.basename(decodeURIComponent(parsed.pathname)) || "reference-image";
@@ -729,7 +764,6 @@ function generationBody(job, model, count) {
     n: count,
     size: job.size,
     quality: job.quality,
-    response_format: "b64_json",
   };
   if (job.historyDisabled !== null) {
     body.history_disabled = job.historyDisabled;
@@ -744,7 +778,6 @@ function editBody(job, inputs, model, count) {
   form.append("n", String(count));
   form.append("size", job.size);
   form.append("quality", job.quality);
-  form.append("response_format", "b64_json");
   for (const input of inputs) {
     form.append("image", new Blob([input.bytes], { type: input.mime }), input.name);
   }

@@ -132,7 +132,7 @@ The API may accept a requested tier while returning different actual pixel dimen
 - Jobs without references call `POST <baseUrl>/images/generations` with JSON.
 - Jobs with references call `POST <baseUrl>/images/edits` with multipart uploads.
 - Remote references are downloaded by the Claude Code host and uploaded as files. This makes host-local URLs usable even when the API runs inside a container.
-- The runner always requests `b64_json` for reliable local persistence and also preserves any service URL returned by the API.
+- The standard request omits the legacy `response_format` field. GPT Image models return `b64_json` by default, and the runner also supports API responses containing an image URL.
 
 ## Concurrency
 

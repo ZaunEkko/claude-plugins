@@ -191,7 +191,7 @@ test("generates an image, saves it without overwriting, and returns clickable UR
   assert.equal(requestPath, "/v1/images/generations");
   assert.equal(authorization, "Bearer test-secret-key");
   assert.equal(requestBody.prompt, "A blue icon");
-  assert.equal(requestBody.response_format, "b64_json");
+  assert.equal("response_format" in requestBody, false);
   assert.equal("history_disabled" in requestBody, false);
   assert.equal(await fs.readFile(first.jobs[0].files[0].path, "base64"), PNG_BASE64);
   assert.equal(first.jobs[0].files[0].width, 1);
@@ -254,6 +254,40 @@ test("uploads local reference images with multipart form data", async (t) => {
   assert.match(multipartBody, /name="image"; filename="reference.png"/u);
   assert.match(multipartBody, /name="prompt"/u);
   assert.match(multipartBody, /Turn it red/u);
+  assert.doesNotMatch(multipartBody, /name="response_format"/u);
+});
+
+test("stops chunked remote references at maxInputBytes", async (t) => {
+  const directory = await temporaryDirectory(t);
+  let apiRequests = 0;
+  const baseUrl = await startServer(t, async (request, response) => {
+    if (request.url === "/reference.png") {
+      response.writeHead(200, { "Content-Type": "image/png" });
+      response.write(PNG_BYTES);
+      response.end(Buffer.alloc(2048));
+      return;
+    }
+    apiRequests += 1;
+    await readBody(request);
+    successResponse(response);
+  });
+  const referenceUrl = `${baseUrl.replace(/\/v1$/u, "")}/reference.png`;
+
+  const result = await runJobs({
+    id: "oversized-remote-reference",
+    prompt: "Edit this image",
+    images: [referenceUrl],
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxInputBytes: 1024,
+    }),
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.jobs[0].error.code, "image_too_large");
+  assert.equal(apiRequests, 0);
 });
 
 test("enforces the shared global concurrency limit", async (t) => {
