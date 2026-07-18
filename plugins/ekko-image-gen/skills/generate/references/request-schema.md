@@ -59,7 +59,7 @@ The runner reads configuration on every invocation; editing the JSON file does n
 
 `maxImagesPerRequest` is an optional provider capability ceiling from `1` to `4`, not the user's logical variant count. The default is `4`. When an upstream accepts a larger `n` but returns fewer items, the runner infers the effective response size and schedules bounded follow-up requests only for the remaining logical count. Set the field explicitly when the provider's limit is already known and the initial probe should be avoided.
 
-`maxOutputBytes` limits each decoded base64 image and each generated-image URL download. The default is `52428800` bytes (50 MiB). URL responses are checked by `Content-Length` when available and otherwise streamed under the limit, so an oversized provider response is rejected before it can be fully buffered or written.
+`maxOutputBytes` limits each decoded base64 image and each generated-image URL download. The default is `52428800` bytes (50 MiB). URL responses are checked by `Content-Length` when available and otherwise streamed under the limit. Before JSON parsing, each Images API response is also streamed under a derived bound: base64 expansion of `maxOutputBytes` multiplied by that upstream request's image count, plus 64 KiB for metadata. Exceeding this bound returns `response_too_large` without retrying or switching models.
 
 Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default is `gpt-image-2`, so normal installations omit `models`; configure an ordered list only when the endpoint uses different names or needs explicit fallback.
 
@@ -139,6 +139,7 @@ The API may accept a requested tier while returning different actual pixel dimen
 - Remote references are downloaded by the Claude Code host and uploaded as files. This makes host-local URLs usable even when the API runs inside a container.
 - The standard request omits the legacy `response_format` field. GPT Image models return `b64_json` by default, and the runner also supports API responses containing an image URL.
 - `timeoutMs` remains active through response-body consumption, not only until headers arrive.
+- Images API JSON bodies are streamed under a per-request bound derived from `maxOutputBytes`, upstream request count, base64 expansion, and 64 KiB of metadata allowance before `JSON.parse` runs.
 - Generated base64 and URL payloads must decode to PNG, JPEG, GIF, WebP, or BMP bytes before any output file is written.
 - Generated base64 bytes and streamed URL downloads must stay within `maxOutputBytes`.
 

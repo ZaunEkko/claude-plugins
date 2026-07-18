@@ -41,6 +41,7 @@ const DEFAULT_CONFIG = Object.freeze({
   maxOutputBytes: 50 * 1024 * 1024,
 });
 
+const JSON_RESPONSE_OVERHEAD_BYTES = 64 * 1024;
 const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const MODEL_FALLBACK_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const MODEL_FALLBACK_CLIENT_STATUSES = new Set([400, 404, 422]);
@@ -591,16 +592,21 @@ async function fetchWithTimeout(fetchImpl, url, options, timeoutMs, consumeRespo
   }
 }
 
-async function readResponseBytes(response, maximumBytes, tooLargeMessage) {
+async function readResponseBytes(
+  response,
+  maximumBytes,
+  tooLargeMessage,
+  { code = "image_too_large", status = null } = {},
+) {
   const declaredLength = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
-    throw new ImageGenError(tooLargeMessage, { code: "image_too_large" });
+    throw new ImageGenError(tooLargeMessage, { code, status });
   }
 
   if (!response.body || typeof response.body.getReader !== "function") {
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length > maximumBytes) {
-      throw new ImageGenError(tooLargeMessage, { code: "image_too_large" });
+      throw new ImageGenError(tooLargeMessage, { code, status });
     }
     return bytes;
   }
@@ -618,7 +624,7 @@ async function readResponseBytes(response, maximumBytes, tooLargeMessage) {
       totalBytes += chunk.length;
       if (totalBytes > maximumBytes) {
         await reader.cancel().catch(() => {});
-        throw new ImageGenError(tooLargeMessage, { code: "image_too_large" });
+        throw new ImageGenError(tooLargeMessage, { code, status });
       }
       chunks.push(chunk);
     }
@@ -796,8 +802,19 @@ function shouldFallbackModel(error) {
   return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
-async function parseResponse(response) {
-  const text = await response.text();
+function jsonResponseLimit(config, count) {
+  const encodedImageBytes = Math.ceil(config.maxOutputBytes / 3) * 4;
+  return encodedImageBytes * count + JSON_RESPONSE_OVERHEAD_BYTES;
+}
+
+async function parseResponse(response, maximumBytes) {
+  const bytes = await readResponseBytes(
+    response,
+    maximumBytes,
+    "Image service JSON response exceeds the bounded response limit",
+    { code: "response_too_large" },
+  );
+  const text = bytes.toString("utf8");
   if (!text) {
     return {};
   }
@@ -811,7 +828,7 @@ async function parseResponse(response) {
   }
 }
 
-async function callApi(endpoint, buildRequest, config, fetchImpl) {
+async function callApi(endpoint, buildRequest, config, fetchImpl, responseLimitBytes) {
   const url = `${config.baseUrl}${endpoint}`;
   let lastError = null;
 
@@ -831,7 +848,10 @@ async function callApi(endpoint, buildRequest, config, fetchImpl) {
           },
         },
         config.timeoutMs,
-        async (response) => ({ response, body: await parseResponse(response) }),
+        async (response) => ({
+          response,
+          body: await parseResponse(response, responseLimitBytes),
+        }),
       );
       if (response.ok) {
         return body;
@@ -848,7 +868,11 @@ async function callApi(endpoint, buildRequest, config, fetchImpl) {
       lastError = error instanceof ImageGenError
         ? error
         : new ImageGenError(redact(error.message, config.apiKey), { code: "network_error" });
-      if (attempt === config.maxRetries || lastError.status && !RETRYABLE_STATUSES.has(lastError.status)) {
+      if (
+        lastError.code === "response_too_large" ||
+        attempt === config.maxRetries ||
+        lastError.status && !RETRYABLE_STATUSES.has(lastError.status)
+      ) {
         throw lastError;
       }
     } finally {
@@ -896,6 +920,7 @@ function editBody(job, inputs, model, count) {
 }
 
 async function requestImageChunk(job, inputs, mode, model, count, config, fetchImpl) {
+  const responseLimitBytes = jsonResponseLimit(config, count);
   return mode === "generate"
     ? callApi(
         "/images/generations",
@@ -905,12 +930,14 @@ async function requestImageChunk(job, inputs, mode, model, count, config, fetchI
         }),
         config,
         fetchImpl,
+        responseLimitBytes,
       )
     : callApi(
         "/images/edits",
         () => ({ body: editBody(job, inputs, model, count) }),
         config,
         fetchImpl,
+        responseLimitBytes,
       );
 }
 

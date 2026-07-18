@@ -15,10 +15,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Bumped `ekko-image-gen` to `0.1.10` so user-scope version-cached installations receive non-empty environment override handling, scalar-reference normalization, bounded output downloads, multi-image auto-adaptation, the standard GPT Image request shape, streamed input and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, intra-response partial-file preservation, precise model-fallback classification, correct environment model precedence, and public marketplace documentation.
+- Bumped `ekko-image-gen` to `0.1.11` so user-scope version-cached installations receive bounded Images API JSON response streaming, non-empty environment override handling, scalar-reference normalization, bounded output downloads, multi-image auto-adaptation, the standard GPT Image request shape, streamed input and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, intra-response partial-file preservation, precise model-fallback classification, correct environment model precedence, and public marketplace documentation.
 
 ### Fixed
 
+- Stream-limited Images API JSON response bodies before parsing, deriving each request limit from `maxOutputBytes`, request count, base64 expansion, and a bounded metadata allowance; oversized responses fail once with `response_too_large` instead of retrying or switching models.
 - Ignored empty or whitespace-only `EKKO_IMAGE_GEN_*` overrides so unfilled shell templates cannot replace valid local JSON endpoint, API-key, or advanced settings.
 - Preserved scalar `images` and `referenceImages` values as one-element reference lists instead of silently routing those jobs to text generation.
 - Bounded generated base64 images and streamed image-URL downloads with the configurable `maxOutputBytes` limit.

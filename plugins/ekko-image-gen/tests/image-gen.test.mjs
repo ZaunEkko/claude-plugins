@@ -302,6 +302,73 @@ test("keeps request timeouts active while reading response bodies", async (t) =>
   assert.ok(Date.now() - startedAt < 7000);
 });
 
+test("stops oversized chunked Images API JSON before full buffering", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const prefix = Buffer.from('{"data":[{"b64_json":"', "utf8");
+  const chunk = Buffer.alloc(1024, 0x41);
+  const plannedChunks = 100;
+  let requestCount = 0;
+  let resolveClosed;
+  const closed = new Promise((resolve) => {
+    resolveClosed = resolve;
+  });
+  const baseUrl = await startServer(t, async (request, response) => {
+    requestCount += 1;
+    await readBody(request);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.write(prefix);
+    let sentChunks = 0;
+    const timer = setInterval(() => {
+      sentChunks += 1;
+      response.write(chunk);
+      if (sentChunks === plannedChunks) {
+        clearInterval(timer);
+        response.end('"}]}');
+      }
+    }, 1);
+    response.on("close", () => {
+      clearInterval(timer);
+      resolveClosed({
+        sentBytes: prefix.length + sentChunks * chunk.length,
+        plannedBytes: prefix.length + plannedChunks * chunk.length + 4,
+      });
+    });
+  });
+
+  const result = await runJobs({
+    id: "oversized-json-response",
+    prompt: "Exercise the JSON response limit",
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["primary-model", "fallback-model"],
+      model: undefined,
+      maxOutputBytes: 1024,
+      maxRetries: 2,
+    }),
+  });
+
+  let timeout;
+  const closeReport = await Promise.race([
+    closed,
+    new Promise((resolve) => {
+      timeout = setTimeout(() => resolve(null), 2000);
+    }),
+  ]);
+  clearTimeout(timeout);
+
+  assert.equal(result.status, "error");
+  assert.equal(result.jobs[0].error.code, "response_too_large");
+  assert.equal(requestCount, 1);
+  assert.deepEqual(
+    result.jobs[0].error.details.modelAttempts.map((attempt) => attempt.model),
+    ["primary-model"],
+  );
+  assert.ok(closeReport, "expected the oversized JSON stream to close");
+  assert.ok(closeReport.sentBytes < closeReport.plannedBytes, JSON.stringify(closeReport));
+});
+
 test("sends the provider history extension only when explicitly requested", async (t) => {
   const directory = await temporaryDirectory(t);
   let requestBody = null;

@@ -31,6 +31,8 @@
 
 `maxImagesPerRequest` 是高级可选上限，默认 `4`，有效范围 `1-4`。不配置时，如果服务对 `n: 3` 只返回一张，runner 会从真实响应推断有效单次能力，并在原始逻辑 `count` 范围内安排有界 follow-up 请求。不同素材 job 仍可并发执行。
 
+`maxOutputBytes` 是高级可选的单张输出上限，默认 50 MiB。除了限制解码后的 base64 图片和流式图片 URL，runner 还会在解析前限制 Images API JSON：按本次请求数量和 base64 膨胀推导容量，并预留 64 KiB 元数据；超限返回 `response_too_large`，不会重试或切换模型。
+
 如果由 Agent 协助安装，应让 Agent 检查并创建只包含 `baseUrl` 与占位 `apiKey` 的配置模板，然后提示用户直接编辑 `%USERPROFILE%\.claude\ekko-image-gen.local.json`（Windows）或 `~/.claude/ekko-image-gen.local.json`。不要在对话中粘贴 API Key。使用第三方 endpoint 时，提示词和参考图会发送到该第三方服务。
 
 仓库默认模型为 `gpt-image-2`，普通用户无需填写 `models`。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。
@@ -113,5 +115,6 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 - 连接失败：确认用户配置中的 `baseUrl` 可访问；localhost 服务需已启动，第三方 HTTPS endpoint 需检查网络、URL 和认证。
 - 图生图 URL 失败：优先粘贴图片或使用本地路径；runner 会从宿主下载后 multipart 上传。
 - `queue_timeout`：降低 worker 数量或检查是否存在长期占用的生成请求。
+- `response_too_large`：Images API 返回的 JSON 超过按单图上限和本次请求数量推导出的安全边界；检查服务异常响应，或在确认输出确有需要后提高 `maxOutputBytes`。
 - 请求多张但服务单次只返回一张：runner 会自动补齐；若后续请求失败，检查 `partial` 错误。已知服务只能单张时可选设 `maxImagesPerRequest: 1` 以省去首次探测。
 - 终端不显示图片：使用输出的 `file:///` 链接 Ctrl+点击打开。
