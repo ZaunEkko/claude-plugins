@@ -143,7 +143,7 @@ The API may accept a requested tier while returning different actual pixel dimen
 
 Use one logical job with `count: 1-4` for variants of one prompt. The runner splits that count into serial upstream requests according to `maxImagesPerRequest`; every request still acquires its own global slot. Use multiple concurrent jobs for different prompts or assets.
 
-If an upstream response returns fewer items than requested, the runner preserves those files, emits a count warning, and replaces the remaining request plan with bounded follow-up chunks inferred from the actual response. It never requests more than the original logical count. If a later request fails, earlier files remain available in a job with `status: "partial"`.
+If an upstream response returns fewer items than requested, the runner preserves those files, emits a count warning, and replaces the remaining request plan with bounded follow-up chunks inferred from the actual response. It never requests more than the original logical count. If a later request fails, or a later item in the same response cannot be decoded, downloaded, or written after earlier items were saved, the job becomes `partial` and returns every successful file path.
 
 ## Output JSON
 

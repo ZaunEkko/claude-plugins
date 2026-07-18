@@ -114,7 +114,7 @@ plugins/ekko-image-gen/
 - 服务 URL：http://localhost:3050/images/...png
 ```
 
-runner 使用排他写入，不覆盖已有文件；发生同名冲突时自动添加数字后缀。多图 job 还会报告 `requestedCount`、`returnedCount`、`requestCount`、`countSplitUsed` 和 `usageByRequest`。上游短返回会保留已有文件并产生数量告警；后续拆分请求失败时，job 状态为 `partial`，此前成功落盘的图片不会被删除。
+runner 使用排他写入，不覆盖已有文件；发生同名冲突时自动添加数字后缀。多图 job 还会报告 `requestedCount`、`returnedCount`、`requestCount`、`countSplitUsed` 和 `usageByRequest`。上游短返回会保留已有文件并产生数量告警；后续拆分请求失败，或同一响应中较后的图片解码、下载或写入失败时，job 状态为 `partial`，所有已经成功落盘的图片都会保留并返回可点击路径。
 
 ## 输出目录策略
 

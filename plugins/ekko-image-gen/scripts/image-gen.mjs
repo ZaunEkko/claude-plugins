@@ -67,12 +67,16 @@ const MODEL_FALLBACK_MESSAGE_PATTERNS = Object.freeze([
 const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high"]);
 
 class ImageGenError extends Error {
-  constructor(message, { code = "image_gen_error", status = null, details = null } = {}) {
+  constructor(
+    message,
+    { code = "image_gen_error", status = null, details = null, partialFiles = [] } = {},
+  ) {
     super(message);
     this.name = "ImageGenError";
     this.code = code;
     this.status = status;
     this.details = details;
+    this.partialFiles = partialFiles;
   }
 }
 
@@ -963,34 +967,47 @@ async function persistResponse(
   const files = [];
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
-    const resolved = await responseItemBytes(item, config, fetchImpl);
-    const dimensions = imageDimensions(resolved.bytes, resolved.mime);
-    const filePath = await writeUniqueFile(
-      job.outputDir,
-      job.outputName,
-      startIndex + index,
-      totalRequested,
-      extensionForMime(resolved.mime),
-      resolved.bytes,
-    );
-    const absolutePath = path.resolve(filePath);
-    const directory = path.dirname(absolutePath);
-    files.push({
-      path: absolutePath,
-      fileUrl: pathToFileURL(absolutePath).href,
-      directory,
-      directoryUrl: pathToFileURL(`${directory}${path.sep}`).href,
-      serviceUrl: nonEmptyString(item.url),
-      revisedPrompt: nonEmptyString(item.revised_prompt),
-      bytes: resolved.bytes.length,
-      width: dimensions.width,
-      height: dimensions.height,
-      requestedWidth: requested.width,
-      requestedHeight: requested.height,
-      sizeMatched: dimensions.width === null || dimensions.height === null
-        ? null
-        : dimensions.width === requested.width && dimensions.height === requested.height,
-    });
+    try {
+      const resolved = await responseItemBytes(item, config, fetchImpl);
+      const dimensions = imageDimensions(resolved.bytes, resolved.mime);
+      const filePath = await writeUniqueFile(
+        job.outputDir,
+        job.outputName,
+        startIndex + index,
+        totalRequested,
+        extensionForMime(resolved.mime),
+        resolved.bytes,
+      );
+      const absolutePath = path.resolve(filePath);
+      const directory = path.dirname(absolutePath);
+      files.push({
+        path: absolutePath,
+        fileUrl: pathToFileURL(absolutePath).href,
+        directory,
+        directoryUrl: pathToFileURL(`${directory}${path.sep}`).href,
+        serviceUrl: nonEmptyString(item.url),
+        revisedPrompt: nonEmptyString(item.revised_prompt),
+        bytes: resolved.bytes.length,
+        width: dimensions.width,
+        height: dimensions.height,
+        requestedWidth: requested.width,
+        requestedHeight: requested.height,
+        sizeMatched: dimensions.width === null || dimensions.height === null
+          ? null
+          : dimensions.width === requested.width && dimensions.height === requested.height,
+      });
+    } catch (error) {
+      throw new ImageGenError(error.message, {
+        code: error.code,
+        status: error.status,
+        details: {
+          ...(error.details && typeof error.details === "object" ? error.details : {}),
+          responseItemIndex: index + 1,
+          outputIndex: startIndex + index + 1,
+        },
+        partialFiles: files,
+      });
+    }
   }
   return files;
 }
@@ -1156,11 +1173,30 @@ async function runJob(job, config, fetchImpl, cwd) {
         limit: requestedCount,
       });
     } catch (error) {
+      const partialChunkFiles = Array.isArray(error.partialFiles) ? error.partialFiles : [];
+      if (partialChunkFiles.length > 0) {
+        const failedItemIndex =
+          error.details?.responseItemIndex ?? (partialChunkFiles.length + 1);
+        files.push(...partialChunkFiles);
+        usageByRequest.push({
+          requestIndex: requestIndex + 1,
+          requestedCount,
+          returnedCount: partialChunkFiles.length,
+          serviceReturnedCount,
+          usage: body?.usage ?? null,
+        });
+        countWarnings.push(
+          `Saved ${partialChunkFiles.length} image(s) from upstream request ${requestIndex + 1} before response item ${failedItemIndex} failed`,
+        );
+      }
       if (files.length === 0) {
         throw new ImageGenError(error.message, {
           code: error.code,
           status: error.status,
-          details: { modelAttempts },
+          details: {
+            ...(error.details && typeof error.details === "object" ? error.details : {}),
+            modelAttempts,
+          },
         });
       }
       return buildJobResult(job, {

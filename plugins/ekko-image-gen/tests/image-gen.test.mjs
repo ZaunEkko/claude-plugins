@@ -332,6 +332,59 @@ test("rejects successful responses with non-image base64 or URL payloads", async
   ]);
 });
 
+test("reports files saved before a later response item fails", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const outputDir = path.join(directory, "output");
+  const invalidBase64 = Buffer.from("not an image", "utf8").toString("base64");
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    assert.equal(body.n, 2);
+    successResponse(response, {
+      data: [
+        { b64_json: PNG_BASE64 },
+        { b64_json: invalidBase64 },
+      ],
+      usage: { images: 2 },
+    });
+  });
+
+  const result = await runJobs({
+    id: "same-response-partial",
+    prompt: "Return one valid and one invalid item",
+    count: 2,
+    outputDir,
+    outputName: "same-response-partial",
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      maxImagesPerRequest: 4,
+    }),
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.summary.partial, 1);
+  assert.equal(result.summary.failed, 0);
+  assert.equal(result.jobs[0].status, "partial");
+  assert.equal(result.jobs[0].returnedCount, 1);
+  assert.equal(result.jobs[0].requestCount, 1);
+  assert.equal(result.jobs[0].countSplitUsed, false);
+  assert.equal(result.jobs[0].files.length, 1);
+  assert.equal(path.basename(result.jobs[0].files[0].path), "same-response-partial-1.png");
+  assert.equal((await fs.stat(result.jobs[0].files[0].path)).isFile(), true);
+  assert.deepEqual(result.jobs[0].usageByRequest[0], {
+    requestIndex: 1,
+    requestedCount: 2,
+    returnedCount: 1,
+    serviceReturnedCount: 2,
+    usage: { images: 2 },
+  });
+  assert.equal(result.jobs[0].error.code, "invalid_response");
+  assert.equal(result.jobs[0].error.details.requestIndex, 1);
+  assert.equal(result.jobs[0].error.details.responseItemIndex, 2);
+  assert.equal(result.jobs[0].error.details.outputIndex, 2);
+  assert.match(result.jobs[0].warnings.join("\n"), /Saved 1 image.*item 2 failed/u);
+});
+
 test("uploads local reference images with multipart form data", async (t) => {
   const directory = await temporaryDirectory(t);
   const referencePath = path.join(directory, "reference.png");
