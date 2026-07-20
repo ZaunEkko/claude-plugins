@@ -20,7 +20,7 @@
     {
       "name": "ekko-image-gen",
       "source": "./plugins/ekko-image-gen",
-      "description": "Context-aware OpenAI-compatible image generation with one command for text-to-image, pasted-image editing, bounded parallel workers, parent-agent visual review, local output paths, and host-dependent convenience links.",
+      "description": "Context-aware OpenAI-compatible image generation with bounded workers, parent visual review, absolute paths, and temporary loopback HTTP preview links without automatic GUI launch.",
       "author": {
         "name": "ZaunEkko",
         "url": "https://github.com/ZaunEkko"

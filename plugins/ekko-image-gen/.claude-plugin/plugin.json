@@ -1,7 +1,7 @@
 {
   "name": "ekko-image-gen",
-  "version": "0.1.13",
-  "description": "Context-aware OpenAI-compatible image generation for Claude Code with text-to-image, reference-image editing, parallel worker agents, visual review, local output paths, and host-dependent convenience links.",
+  "version": "0.1.14",
+  "description": "Context-aware image generation with visual review, absolute paths, and temporary loopback HTTP preview links without automatic GUI launch.",
   "author": {
     "name": "ZaunEkko",
     "url": "https://github.com/ZaunEkko"

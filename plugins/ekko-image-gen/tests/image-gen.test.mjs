@@ -119,8 +119,9 @@ test("uses load-time plugin root placeholders for runner commands", async () => 
   }
 });
 
-test("treats local file links as host-dependent convenience", async () => {
+test("documents temporary loopback previews without automatic GUI launch", async () => {
   const skill = await fs.readFile(new URL("../skills/generate/SKILL.md", import.meta.url), "utf8");
+  const worker = await fs.readFile(new URL("../agents/image-worker.md", import.meta.url), "utf8");
   const placement = await fs.readFile(
     new URL("../skills/generate/references/output-placement.md", import.meta.url),
     "utf8",
@@ -139,21 +140,24 @@ test("treats local file links as host-dependent convenience", async () => {
     "../../../i18n/en/README.md",
   ].map((relativePath) => fs.readFile(new URL(relativePath, import.meta.url), "utf8")));
   const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
-  const combinedGuidance = [skill, placement, readme, ...publicDocs].join("\n");
+  const combinedGuidance = [skill, worker, placement, readme, ...publicDocs].join("\n");
 
-  assert.equal(manifest.version, "0.1.13");
-  assert.match(manifest.description, /host-dependent convenience links/u);
+  assert.equal(manifest.version, "0.1.14");
+  assert.match(manifest.description, /temporary loopback HTTP preview links/u);
   assert.ok(marketplaceEntry);
-  assert.match(marketplaceEntry.description, /host-dependent convenience links/u);
-  assert.match(skill, /Never promise that a local link will open/u);
-  assert.match(placement, /Ctrl\+click or Cmd\+click may do nothing/u);
-  assert.match(readme, /不是跨终端保证/u);
-  assert.match(publicDocs[2], /不是跨终端保证/u);
+  assert.match(marketplaceEntry.description, /temporary loopback HTTP preview links/u);
+  assert.match(skill, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/preview-image\.mjs"/u);
+  assert.match(skill, /must not launch a browser|never launch a GUI/u);
+  assert.match(skill, /after 15 minutes/u);
+  assert.match(worker, /Never invoke `scripts\/preview-image\.mjs`/u);
+  assert.doesNotMatch(worker, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/preview-image\.mjs"/u);
+  assert.match(placement, /\[打开图片\]\(http:\/\/127\.0\.0\.1:/u);
+  assert.match(readme, /不会主动弹出任何应用/u);
+  assert.match(publicDocs[2], /15 分钟/u);
+  assert.doesNotMatch(combinedGuidance, /scripts\/open-image\.mjs/u);
   assert.doesNotMatch(combinedGuidance, /terminal users can normally use Ctrl\+click/u);
   assert.doesNotMatch(combinedGuidance, /Ctrl\+click normally opens/u);
   assert.doesNotMatch(combinedGuidance, /Windows 终端通常(?:可通过|使用) Ctrl\+鼠标左键/u);
-  assert.doesNotMatch(combinedGuidance, /可点击本地输出/u);
-  assert.doesNotMatch(combinedGuidance, /clickable local (?:files|outputs)/u);
 });
 
 test("inherits configured preset components for partial job size overrides", () => {
