@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.1.2 - 2026-07-20
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.13` and made `Read` previews plus absolute paths the primary portable image results.
+- Documented local `file://` image and directory links as host-dependent convenience links rather than guaranteed terminal actions.
+
+### Fixed
+
+- Removed the misleading claim that terminal users can normally Ctrl+click local image links, and instructed the generate skill to offer a platform opener only after an explicit user request.
+
 ## 2.1.1 - 2026-07-20
 
 ### Changed

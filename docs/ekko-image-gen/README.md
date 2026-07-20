@@ -68,15 +68,15 @@
 成功结果会：
 
 1. 使用 `Read` 尝试在 Claude Code 中直接显示图片；
-2. 输出绝对文件路径；
-3. 输出 `[打开图片](file:///...)`；
-4. 输出 `[打开所在目录](file:///...)`；
+2. 输出作为主要可移植结果的绝对文件路径；
+3. 输出 best-effort 的 `[尝试打开图片](file:///...)`；
+4. 输出 best-effort 的 `[尝试打开所在目录](file:///...)`；
 5. 输出服务返回的 HTTP URL；
 6. 报告 `requestedCount`、`returnedCount`、请求拆分状态和每次请求的原始 usage；
 7. 保留上游短返回或后续请求失败前已经生成的文件，并明确标注数量告警或 `partial` 状态；
 8. 标明主代理验收结果和是否发生重试。
 
-Windows 终端通常使用 Ctrl+鼠标左键打开 Markdown 链接。
+本地 `file://` 链接是否能通过 Ctrl/Cmd+点击打开取决于 Claude Code 渲染器和终端宿主，不是跨终端保证。链接失效时使用绝对路径；只有用户明确要求后，代理才会提议通过 `Bash` 调用当前平台的正常打开器，不会在生成完成后自动弹出 GUI 应用。
 
 ## 输出目录
 
@@ -117,4 +117,4 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 - `queue_timeout`：降低 worker 数量或检查是否存在长期占用的生成请求。
 - `response_too_large`：Images API 返回的 JSON 超过按单图上限和本次请求数量推导出的安全边界；检查服务异常响应，或在确认输出确有需要后提高 `maxOutputBytes`。
 - 请求多张但服务单次只返回一张：runner 会自动补齐；若后续请求失败，检查 `partial` 错误。已知服务只能单张时可选设 `maxImagesPerRequest: 1` 以省去首次探测。
-- 终端不显示图片：使用输出的 `file:///` 链接 Ctrl+点击打开。
+- 终端不显示图片：先使用输出的绝对路径；本地 `file:///` 便利链接可能受终端宿主限制。需要时可明确要求代理调用当前平台的正常打开器。
