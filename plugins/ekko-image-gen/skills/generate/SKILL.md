@@ -3,7 +3,7 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns clickable local links.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.11
+version: 0.1.12
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -74,7 +74,7 @@ Supported UI-derived presets are documented in `references/request-schema.md`. P
 Invoke `scripts/image-gen.mjs` directly through stdin. Avoid subagent overhead for a single ordinary image or edit.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/scripts/image-gen.mjs" <<'EKKO_IMAGE_REQUEST'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/image-gen.mjs" <<'EKKO_IMAGE_REQUEST'
 {"jobs":[{"id":"hero-icon","prompt":"complete prompt","images":[],"outputDir":"absolute directory","outputName":"hero-icon","count":1}]}
 EKKO_IMAGE_REQUEST
 ```
