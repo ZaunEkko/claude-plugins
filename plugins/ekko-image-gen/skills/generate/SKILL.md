@@ -1,9 +1,9 @@
 ---
 name: generate
-description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns clickable local links.
+description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns local output paths with host-dependent convenience links.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.12
+version: 0.1.13
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -113,13 +113,13 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 Always report the chosen output directory. For every image, provide:
 
 - a short asset label;
-- the absolute local path;
-- a Markdown link from the runner's `fileUrl`, formatted as `[打开图片](file:///...)`;
-- a Markdown link from `directoryUrl`, formatted as `[打开所在目录](file:///...)`;
+- the absolute local path as the primary portable result;
+- a best-effort Markdown link from the runner's `fileUrl`, labeled `[尝试打开图片](file:///...)`;
+- a best-effort Markdown link from `directoryUrl`, labeled `[尝试打开所在目录](file:///...)`;
 - the service URL when returned;
 - acceptance status and any remaining caveat.
 
-Use `Read` before the final report to enable direct visual display where the current Claude Code interface supports it. Explain that terminal users can normally use Ctrl+click on the local link. Do not claim inline display succeeded when the host only exposed a file link.
+Use `Read` before the final report to enable direct visual display where the current Claude Code interface supports it. Treat local `file://` links as optional convenience links: Ctrl+click or Cmd+click depends on the Claude Code renderer and terminal host and may do nothing. Never promise that a local link will open. If the user explicitly asks to open the file or directory after a link fails, offer to invoke the platform's normal opener through `Bash`; do not launch a GUI application automatically. Do not claim inline display succeeded when the host only exposed a path or link.
 
 ## Configuration and privacy
 

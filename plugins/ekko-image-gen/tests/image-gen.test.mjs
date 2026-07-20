@@ -119,6 +119,43 @@ test("uses load-time plugin root placeholders for runner commands", async () => 
   }
 });
 
+test("treats local file links as host-dependent convenience", async () => {
+  const skill = await fs.readFile(new URL("../skills/generate/SKILL.md", import.meta.url), "utf8");
+  const placement = await fs.readFile(
+    new URL("../skills/generate/references/output-placement.md", import.meta.url),
+    "utf8",
+  );
+  const readme = await fs.readFile(new URL("../README.md", import.meta.url), "utf8");
+  const manifest = JSON.parse(
+    await fs.readFile(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"),
+  );
+  const marketplace = JSON.parse(
+    await fs.readFile(new URL("../../../.claude-plugin/marketplace.json", import.meta.url), "utf8"),
+  );
+  const publicDocs = await Promise.all([
+    "../../../README.md",
+    "../../../docs/README.md",
+    "../../../docs/ekko-image-gen/README.md",
+    "../../../i18n/en/README.md",
+  ].map((relativePath) => fs.readFile(new URL(relativePath, import.meta.url), "utf8")));
+  const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
+  const combinedGuidance = [skill, placement, readme, ...publicDocs].join("\n");
+
+  assert.equal(manifest.version, "0.1.13");
+  assert.match(manifest.description, /host-dependent convenience links/u);
+  assert.ok(marketplaceEntry);
+  assert.match(marketplaceEntry.description, /host-dependent convenience links/u);
+  assert.match(skill, /Never promise that a local link will open/u);
+  assert.match(placement, /Ctrl\+click or Cmd\+click may do nothing/u);
+  assert.match(readme, /不是跨终端保证/u);
+  assert.match(publicDocs[2], /不是跨终端保证/u);
+  assert.doesNotMatch(combinedGuidance, /terminal users can normally use Ctrl\+click/u);
+  assert.doesNotMatch(combinedGuidance, /Ctrl\+click normally opens/u);
+  assert.doesNotMatch(combinedGuidance, /Windows 终端通常(?:可通过|使用) Ctrl\+鼠标左键/u);
+  assert.doesNotMatch(combinedGuidance, /可点击本地输出/u);
+  assert.doesNotMatch(combinedGuidance, /clickable local (?:files|outputs)/u);
+});
+
 test("inherits configured preset components for partial job size overrides", () => {
   const configured = config("http://localhost:3050/v1", os.tmpdir(), {
     size: "3840x2160",
@@ -287,7 +324,7 @@ test("normalizes a single job and preserves an explicit output target", () => {
   );
 });
 
-test("generates an image, saves it without overwriting, and returns clickable URLs", async (t) => {
+test("generates an image, saves it without overwriting, and returns local file URLs", async (t) => {
   const directory = await temporaryDirectory(t);
   let requestPath = null;
   let authorization = null;

@@ -206,6 +206,8 @@ If an upstream response returns fewer items than requested, the runner preserves
 }
 ```
 
+`path` and `directory` are the primary portable local results. `fileUrl` and `directoryUrl` are correctly encoded `file://` URIs for hosts that support local hyperlinks, but Ctrl/Cmd+click behavior depends on the Claude Code renderer and terminal host and is not guaranteed. `serviceUrl`, when present and reachable from the user host, is an ordinary HTTP(S) convenience link.
+
 Exit codes:
 
 - `0`: every job succeeded;
