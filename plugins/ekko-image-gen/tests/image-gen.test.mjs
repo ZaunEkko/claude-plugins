@@ -106,6 +106,19 @@ test("resolves the image UI aspect-ratio and resolution presets", () => {
   assert.deepEqual(imageDimensions(PNG_BYTES), { width: 1, height: 1 });
 });
 
+test("uses load-time plugin root placeholders for runner commands", async () => {
+  const componentFiles = [
+    new URL("../skills/generate/SKILL.md", import.meta.url),
+    new URL("../agents/image-worker.md", import.meta.url),
+  ];
+
+  for (const componentFile of componentFiles) {
+    const content = await fs.readFile(componentFile, "utf8");
+    assert.match(content, /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/image-gen\.mjs"/u);
+    assert.doesNotMatch(content, /node "\$CLAUDE_PLUGIN_ROOT\//u);
+  }
+});
+
 test("inherits configured preset components for partial job size overrides", () => {
   const configured = config("http://localhost:3050/v1", os.tmpdir(), {
     size: "3840x2160",

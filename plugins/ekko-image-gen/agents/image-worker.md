@@ -36,7 +36,7 @@ If the prompt or output directory is missing, return a blocking error instead of
 3. Invoke the deterministic runner through stdin without placing the API key or prompt in process arguments:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/scripts/image-gen.mjs" <<'EKKO_IMAGE_REQUEST'
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/image-gen.mjs" <<'EKKO_IMAGE_REQUEST'
    {"jobs":[{"id":"assigned-id","prompt":"complete prompt","images":[],"outputDir":"absolute target directory","outputName":"asset-name","count":1}]}
    EKKO_IMAGE_REQUEST
    ```
