@@ -49,10 +49,12 @@ For a user who simply asks for one image:
 - infer a useful destination from the current project;
 - use `generated-images/` only when the image is not yet tied to a project feature;
 - call `Read` on the saved file;
-- return the absolute path as the primary portable result;
-- return `[尝试打开图片](file:///...)` and `[尝试打开所在目录](file:///...)` as best-effort convenience links;
-- state that local `file://` handling depends on the Claude Code renderer and terminal host, so Ctrl+click or Cmd+click may do nothing;
-- only offer to invoke the platform's normal file opener when the user explicitly asks; never launch a GUI application automatically.
+- return the absolute path as the durable result;
+- after parent review, pass accepted paths to `${CLAUDE_PLUGIN_ROOT}/scripts/preview-image.mjs` and return `[打开图片](http://127.0.0.1:...)` links that terminal users can Ctrl/Cmd+click;
+- state that the loopback links expire after 15 minutes while the absolute files remain;
+- keep runner `fileUrl` and `directoryUrl` as host-dependent compatibility metadata rather than the primary action;
+- for a follow-up request to open a previous result after expiry, create a fresh preview link from the accepted path without regenerating;
+- never let an image worker start the preview server and never launch a browser, editor, or platform opener automatically.
 
 ## Ambiguity and safety
 

@@ -208,7 +208,39 @@ If an upstream response returns fewer items than requested, the runner preserves
 
 `path` and `directory` are the primary portable local results. `fileUrl` and `directoryUrl` are correctly encoded `file://` URIs for hosts that support local hyperlinks, but Ctrl/Cmd+click behavior depends on the Claude Code renderer and terminal host and is not guaranteed. `serviceUrl`, when present and reachable from the user host, is an ordinary HTTP(S) convenience link.
 
-Exit codes:
+## Temporary clickable preview helper
+
+Clickable preview URLs are a separate presentation step, not a generation request field. After the parent agent has inspected and accepted the final images, invoke the bundled helper with one to four paths:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/preview-image.mjs" <<'EKKO_IMAGE_PREVIEW'
+{"paths":["D:\\game\\Assets\\UI\\Items\\health-potion.png"]}
+EKKO_IMAGE_PREVIEW
+```
+
+The helper accepts one stdin JSON object containing only a `paths` array. It rejects command-line arguments, URIs, directories, final-component symbolic links, unsupported extensions, mismatched image signatures, Windows UNC/device/alternate-stream paths, and control or bidirectional formatting characters. It supports PNG, JPEG, GIF, WebP, and BMP.
+
+The helper starts a detached HTTP server bound only to `127.0.0.1`. It serves only the validated files under a random 192-bit token, sends `no-store`, `nosniff`, CSP, and no-referrer headers, exposes no directory listing, and exits automatically after 15 minutes. It does not launch a browser, image viewer, or editor.
+
+Successful startup returns:
+
+```json
+{
+  "status": "ready",
+  "pid": 12345,
+  "expiresInSeconds": 900,
+  "files": [
+    {
+      "path": "D:\\game\\Assets\\UI\\Items\\health-potion.png",
+      "url": "http://127.0.0.1:43210/random-token/1/health-potion.png"
+    }
+  ]
+}
+```
+
+Format each returned URL as `[打开图片](http://127.0.0.1:...)`. The user can Ctrl/Cmd+click the ordinary HTTP link; the plugin never opens it automatically. Exit code `1` returns `status: "failed"` with a structured code such as `invalid_request`, `invalid_path`, `path_not_found`, `not_regular_file`, `symlink_not_allowed`, `unsupported_image`, `image_too_large`, or `preview_start_failed`. Preview-link failure must be reported separately and must not change a successful generation result. Loopback URLs may not reach the user's browser when Claude Code runs on a different SSH/container/remote host, so always retain the absolute path.
+
+Generation runner exit codes:
 
 - `0`: every job succeeded;
 - `2`: partial success;

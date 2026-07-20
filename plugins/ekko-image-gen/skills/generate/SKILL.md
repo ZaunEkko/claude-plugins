@@ -1,9 +1,9 @@
 ---
 name: generate
-description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns local output paths with host-dependent convenience links.
+description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", "打开刚才生成的图片", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns absolute paths plus temporary loopback HTTP preview links that terminal users can Ctrl/Cmd+click without an automatic GUI launch.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.13
+version: 0.1.14
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -11,6 +11,15 @@ version: 0.1.13
 Treat `$ARGUMENTS` and the full current user message as the image brief. Include images pasted or attached to that same message as reference inputs. Route text-only jobs to text-to-image and jobs with references to image editing through the bundled runner.
 
 Keep one user-facing command. Do not ask the user to choose between separate text-to-image and image-to-image commands.
+
+## Resolve user-facing preview behavior
+
+- Always use `Read` for visual inspection before publishing results.
+- For every user-facing generation or edit request, create temporary clickable preview links for the final accepted images after inspection and targeted retries. The user does not need to add a separate "open" phrase.
+- Preview links must not launch a browser, image viewer, or editor automatically. The user decides whether to Ctrl/Cmd+click them.
+- When the user asks to open a previously generated image and its preview link is missing or expired, do not generate again. Reuse the accepted local path and create a fresh preview link.
+- Start one preview helper for at most the existing four accepted images. Workers return paths only; the parent creates links after cross-asset review.
+- If the user explicitly declines a local preview server, return absolute paths and `Read` results without creating links.
 
 ## Resolve the task context
 
@@ -91,7 +100,8 @@ Keep the parent agent responsible for:
 - project-aware destination selection;
 - task assignment;
 - cross-asset visual review;
-- retry decisions and final reporting.
+- retry decisions and final reporting;
+- temporary clickable preview-link creation for final accepted images.
 
 If the plugin agent is unavailable in the current host, submit all jobs to the bundled runner in one JSON batch. The runner supports bounded concurrency and the same result format.
 
@@ -108,18 +118,34 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 7. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration.
 8. Never delete a rejected output automatically. Keep it available unless the user explicitly asks for cleanup.
 
+## Create clickable preview links
+
+Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/preview-image.mjs" <<'EKKO_IMAGE_PREVIEW'
+{"paths":["absolute accepted image path"]}
+EKKO_IMAGE_PREVIEW
+```
+
+Use only `scripts/preview-image.mjs` for this action. Do not invoke `explorer.exe`, `open`, `xdg-open`, PowerShell, `cmd.exe`, a browser, or another GUI opener. The helper validates absolute regular non-symlink PNG, JPEG, GIF, WebP, or BMP files, starts a detached HTTP server bound only to `127.0.0.1`, creates a random unguessable token, and exits the server automatically after 15 minutes.
+
+Parse the helper's `files` array and pair each canonical `path` with its `http://127.0.0.1:...` URL. The helper never opens the URL itself. If a previous link expired, call the helper again with the accepted path rather than regenerating the image.
+
+Treat helper status `ready` as successful temporary-link creation, not proof that the user clicked it. Report helper failures separately from generation status. In SSH, containers, remote development, or other split-host setups, `127.0.0.1` may refer to the Claude Code host rather than the user's browser host; keep the absolute path as the durable result.
+
 ## Present results
 
 Always report the chosen output directory. For every image, provide:
 
 - a short asset label;
-- the absolute local path as the primary portable result;
-- a best-effort Markdown link from the runner's `fileUrl`, labeled `[尝试打开图片](file:///...)`;
-- a best-effort Markdown link from `directoryUrl`, labeled `[尝试打开所在目录](file:///...)`;
+- the absolute local path as the durable result;
+- the temporary loopback URL from `preview-image.mjs`, formatted as `[打开图片](http://127.0.0.1:...token...)` so terminal users can Ctrl/Cmd+click it;
+- the runner's `fileUrl` only as compatibility metadata when useful, never as the primary clickable action;
 - the service URL when returned;
-- acceptance status and any remaining caveat.
+- acceptance status, preview expiry, and any remaining caveat.
 
-Use `Read` before the final report to enable direct visual display where the current Claude Code interface supports it. Treat local `file://` links as optional convenience links: Ctrl+click or Cmd+click depends on the Claude Code renderer and terminal host and may do nothing. Never promise that a local link will open. If the user explicitly asks to open the file or directory after a link fails, offer to invoke the platform's normal opener through `Bash`; do not launch a GUI application automatically. Do not claim inline display succeeded when the host only exposed a path or link.
+Use `Read` before the final report to enable direct visual display where the current Claude Code interface supports it. Do not claim the preview opened: the helper only created a temporary HTTP link and never launched a GUI. State that the loopback link expires after 15 minutes and that the absolute path remains valid afterward. Local `file://` handling remains host-dependent and may do nothing.
 
 ## Configuration and privacy
 
