@@ -399,10 +399,33 @@ function normalizeJob(raw, index, config, cwd) {
       code: "invalid_request",
     });
   }
+  const requestedSize = nonEmptyString(raw.size)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  const requestedAspectRatio =
+    nonEmptyString(raw.aspectRatio)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  const requestedResolution =
+    nonEmptyString(raw.resolution)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  const requestedPreset =
+    /^((?:auto)|(?:\d+:\d+))(?:\((1k|2k|4k|auto)\))?$/u.exec(requestedSize ?? "");
+  const effectiveRequestedAspectRatio = requestedPreset?.[1] ?? requestedAspectRatio;
+  const effectiveRequestedResolution = requestedPreset?.[2] ?? requestedResolution;
+  const fallbackAspectRatio =
+    effectiveRequestedResolution &&
+    effectiveRequestedResolution !== "auto" &&
+    config.aspectRatio === "auto"
+      ? null
+      : config.aspectRatio;
+  const fallbackResolution =
+    effectiveRequestedAspectRatio &&
+    effectiveRequestedAspectRatio !== "auto" &&
+    config.resolution === "auto"
+      ? null
+      : config.resolution;
   const size = resolveSize({
-    size: raw.size,
-    aspectRatio: raw.aspectRatio,
-    resolution: raw.resolution,
+    size: requestedSize,
+    aspectRatio: requestedAspectRatio
+      ?? (effectiveRequestedResolution === "auto" ? "auto" : fallbackAspectRatio),
+    resolution: requestedResolution
+      ?? (effectiveRequestedAspectRatio === "auto" ? "auto" : fallbackResolution),
   }, config.size, `jobs[${index}].size`);
 
   let models;

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 2.1.0 - 2026-07-20
 
 ### Added
 
@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Preserved configured aspect-ratio and resolution defaults when a job overrides only one size component, instead of silently falling back to `1:1` or `1k`.
 - Stream-limited Images API JSON response bodies before parsing, deriving each request limit from `maxOutputBytes`, request count, base64 expansion, and a bounded metadata allowance; oversized responses fail once with `response_too_large` instead of retrying or switching models.
 - Ignored empty or whitespace-only `EKKO_IMAGE_GEN_*` overrides so unfilled shell templates cannot replace valid local JSON endpoint, API-key, or advanced settings.
 - Preserved scalar `images` and `referenceImages` values as one-element reference lists instead of silently routing those jobs to text generation.

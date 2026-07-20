@@ -106,6 +106,53 @@ test("resolves the image UI aspect-ratio and resolution presets", () => {
   assert.deepEqual(imageDimensions(PNG_BYTES), { width: 1, height: 1 });
 });
 
+test("inherits configured preset components for partial job size overrides", () => {
+  const configured = config("http://localhost:3050/v1", os.tmpdir(), {
+    size: "3840x2160",
+    aspectRatio: "16:9",
+    resolution: "4k",
+  });
+  const { jobs } = normalizeRequest({
+    jobs: [
+      { id: "ratio", prompt: "ratio", aspectRatio: "9:16" },
+      { id: "resolution", prompt: "resolution", resolution: "2k" },
+      { id: "label", prompt: "label", size: "9:16" },
+      { id: "default", prompt: "default" },
+      { id: "auto", prompt: "auto", aspectRatio: "auto" },
+    ],
+  }, configured);
+
+  assert.deepEqual(
+    jobs.map(({ size, aspectRatio, resolution }) => ({ size, aspectRatio, resolution })),
+    [
+      { size: "2160x3840", aspectRatio: "9:16", resolution: "4k" },
+      { size: "2560x1440", aspectRatio: "16:9", resolution: "2k" },
+      { size: "2160x3840", aspectRatio: "9:16", resolution: "4k" },
+      { size: "3840x2160", aspectRatio: "16:9", resolution: "4k" },
+      { size: "1024x1024", aspectRatio: "auto", resolution: "auto" },
+    ],
+  );
+
+  const autoConfigured = config("http://localhost:3050/v1", os.tmpdir(), {
+    size: "1024x1024",
+    aspectRatio: "auto",
+    resolution: "auto",
+  });
+  const autoJobs = normalizeRequest({
+    jobs: [
+      { id: "auto-ratio", prompt: "auto ratio", aspectRatio: "16:9" },
+      { id: "auto-resolution", prompt: "auto resolution", resolution: "2k" },
+    ],
+  }, autoConfigured).jobs;
+  assert.deepEqual(
+    autoJobs.map(({ size, aspectRatio, resolution }) => ({ size, aspectRatio, resolution })),
+    [
+      { size: "1920x1088", aspectRatio: "16:9", resolution: "1k" },
+      { size: "2048x2048", aspectRatio: "1:1", resolution: "2k" },
+    ],
+  );
+});
+
 test("loads user config and applies environment overrides", async (t) => {
   const directory = await temporaryDirectory(t);
   const configPath = path.join(directory, "config.json");
