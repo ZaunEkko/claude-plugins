@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.1.3 - 2026-07-20
+
+### Added
+
+- Added a dependency-free `preview-image.mjs` helper that serves one to four accepted images through tokenized `http://127.0.0.1` URLs and expires automatically after 15 minutes.
+- Added isolated preview tests for path and image validation, loopback-only serving, tokenized routes, security headers, detached child startup, and the guarantee that no browser or system viewer is launched.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.14` and made absolute paths plus temporary Ctrl/Cmd-clickable HTTP preview links the default user-facing result after parent-agent visual acceptance.
+- Kept runner `fileUrl` and `directoryUrl` values as compatibility metadata while removing them as the primary click action.
+
+### Fixed
+
+- Replaced non-functional terminal `file://` actions with ordinary loopback HTTP links without automatically popping open a browser, image editor, or system viewer.
+
 ## 2.1.2 - 2026-07-20
 
 ### Changed

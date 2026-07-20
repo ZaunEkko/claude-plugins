@@ -1,6 +1,6 @@
 # `ekko-image-gen` 使用指南
 
-`ekko-image-gen` 通过一个 Claude Code 命令调用用户配置的 OpenAI-compatible Images API。endpoint 可以是 localhost，也可以是第三方 HTTPS 服务；当前 Agent 负责根据项目上下文决定素材目录、展示结果、验收图片和定向重试。
+`ekko-image-gen` 通过一个 Claude Code 命令调用用户配置的 OpenAI-compatible Images API。endpoint 可以是 localhost，也可以是第三方 HTTPS 服务；当前 Agent 负责根据项目上下文决定素材目录、展示结果、验收图片和定向重试，并默认返回可 Ctrl/Cmd+点击的临时 loopback HTTP 预览链接。
 
 ## 命令
 
@@ -14,7 +14,10 @@
 - 当前消息粘贴或附加了图片：图生图；
 - 提供多个图片路径或 URL：多参考图编辑；
 - 多个独立素材：受控 worker 并行生成；
-- 一张图的多个方案：使用一个逻辑 job 的 `count: 1-4`，runner 可按服务商单次上限自动拆分。
+- 一张图的多个方案：使用一个逻辑 job 的 `count: 1-4`，runner 可按服务商单次上限自动拆分；
+- 用户发起生成或编辑：主代理验收后默认返回绝对路径和临时 `http://127.0.0.1` 点击预览链接；
+- 用户 Ctrl/Cmd+点击链接：浏览器显示图片，插件本身不会主动弹出应用；
+- 链接过期后要求重新预览：复用已验收本地路径，不重新生成。
 
 ## 快速配置
 
@@ -55,6 +58,14 @@
 /ekko-image-gen:generate 保留人物和构图，把整体改成低多边形游戏立绘风格
 ```
 
+### 默认提供点击预览
+
+```text
+/ekko-image-gen:generate 生成一张适合当前产品登录页的抽象安全插画，不要文字
+```
+
+主代理完成 `Read` 检查、验收和必要重试后，会返回绝对路径和一个 15 分钟有效的 `http://127.0.0.1` 链接。用户可在 Claude Code 终端中 Ctrl/Cmd+点击链接，由浏览器显示图片；插件不会主动启动浏览器、图片查看器或编辑器。链接过期后可要求重新生成预览链接，图片不会重新生成。一次最多为 4 张验收图创建链接。
+
 ### 项目素材
 
 ```text
@@ -68,15 +79,17 @@
 成功结果会：
 
 1. 使用 `Read` 尝试在 Claude Code 中直接显示图片；
-2. 输出作为主要可移植结果的绝对文件路径；
-3. 输出 best-effort 的 `[尝试打开图片](file:///...)`；
-4. 输出 best-effort 的 `[尝试打开所在目录](file:///...)`；
-5. 输出服务返回的 HTTP URL；
-6. 报告 `requestedCount`、`returnedCount`、请求拆分状态和每次请求的原始 usage；
-7. 保留上游短返回或后续请求失败前已经生成的文件，并明确标注数量告警或 `partial` 状态；
-8. 标明主代理验收结果和是否发生重试。
+2. 输出作为持久结果的绝对文件路径；
+3. 输出 `[打开图片](http://127.0.0.1:...)` 临时预览链接；
+4. 输出服务返回的 HTTP URL；
+5. 报告 `requestedCount`、`returnedCount`、请求拆分状态和每次请求的原始 usage；
+6. 保留上游短返回或后续请求失败前已经生成的文件，并明确标注数量告警或 `partial` 状态；
+7. 标明主代理验收结果和是否发生重试；
+8. 标明预览链接 15 分钟有效；预览 helper 失败时仍保留成功生成状态和绝对路径。
 
-本地 `file://` 链接是否能通过 Ctrl/Cmd+点击打开取决于 Claude Code 渲染器和终端宿主，不是跨终端保证。链接失效时使用绝对路径；只有用户明确要求后，代理才会提议通过 `Bash` 调用当前平台的正常打开器，不会在生成完成后自动弹出 GUI 应用。
+本地 `file://` 链接仍可能受 Claude Code 渲染器和终端宿主限制，因此不再作为主要点击入口。主代理在最终验收后调用 `preview-image.mjs`，启动只绑定 `127.0.0.1` 的临时服务，为最多 4 张具体图片生成带随机 token 的普通 HTTP 链接。
+
+helper 不执行系统 opener，也不启动浏览器、图片查看器或编辑器。用户是否打开由 Ctrl/Cmd+点击决定。服务不开放目录，发送 `no-store`、`nosniff`、CSP 与 no-referrer 响应头，并在 15 分钟后退出。SSH、容器或远程开发可能使浏览器无法访问 Claude Code 主机的 loopback 地址，此时使用绝对路径。
 
 ## 输出目录
 
@@ -117,4 +130,6 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 - `queue_timeout`：降低 worker 数量或检查是否存在长期占用的生成请求。
 - `response_too_large`：Images API 返回的 JSON 超过按单图上限和本次请求数量推导出的安全边界；检查服务异常响应，或在确认输出确有需要后提高 `maxOutputBytes`。
 - 请求多张但服务单次只返回一张：runner 会自动补齐；若后续请求失败，检查 `partial` 错误。已知服务只能单张时可选设 `maxImagesPerRequest: 1` 以省去首次探测。
-- 终端不显示图片：先使用输出的绝对路径；本地 `file:///` 便利链接可能受终端宿主限制。需要时可明确要求代理调用当前平台的正常打开器。
+- 点击预览链接无响应：确认终端允许 Ctrl/Cmd+点击普通 HTTP URL，并检查链接是否已超过 15 分钟；过期后可要求重新创建预览链接。
+- `preview_start_failed`：临时 loopback 服务未能启动；图片仍已成功生成，请使用绝对路径。
+- SSH / 容器 / 远程开发：`127.0.0.1` 可能指向 Claude Code 所在主机而不是浏览器所在主机；使用端口转发或绝对路径。

@@ -509,7 +509,7 @@ export function normalizeRequest(payload, config, { cwd = process.cwd() } = {}) 
   };
 }
 
-function detectImageMime(bytes) {
+export function detectImageMime(bytes) {
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
     return "image/png";
   }

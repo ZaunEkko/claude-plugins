@@ -41,7 +41,7 @@
 | 插件 | 状态 | 说明 | 文档 |
 |---|---|---|---|
 | `commit-commands` | 可用 · 兼容分发 | 基于 Anthropic 官方同名插件，保留三个命令，提供当前会话模型 attribution、Bash 与已知 Playwright unsafe 提交防绕过保护、显式 detached session 绑定，以及确认式安全分支/worktree 清理。 | [使用指南](docs/commit-commands/README.md) · [实现与上游说明](plugins/commit-commands/README.md) |
-| `ekko-image-gen` | 可用 · 原创 | 使用一个命令调用用户配置的 OpenAI-compatible Images API（localhost 或第三方 HTTPS），支持文生图、粘贴图片后的图生图、项目上下文感知落盘、受控并发叶子 worker、主代理视觉验收、`Read` 预览、绝对路径和取决于终端宿主的本地便利链接。 | [使用指南](docs/ekko-image-gen/README.md) · [实现说明](plugins/ekko-image-gen/README.md) |
+| `ekko-image-gen` | 可用 · 原创 | 使用一个命令调用用户配置的 OpenAI-compatible Images API（localhost 或第三方 HTTPS），支持文生图、粘贴图片后的图生图、项目上下文感知落盘、受控并发叶子 worker、主代理视觉验收、绝对路径，以及可 Ctrl/Cmd+点击且不会自动弹窗的临时本地 HTTP 预览链接。 | [使用指南](docs/ekko-image-gen/README.md) · [实现说明](plugins/ekko-image-gen/README.md) |
 
 `commit-commands` 与官方分发暴露相同命名空间。请在同一作用域内只启用一个版本。
 
