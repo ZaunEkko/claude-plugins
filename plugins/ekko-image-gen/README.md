@@ -12,8 +12,8 @@
 - 一个提示词可通过逻辑 `count: 1-4` 生成多个变体；runner 会根据高级 provider cap 或实际短返回自动拆分请求
 - 多个独立素材可由受控的叶子 `image-worker` 并行生成
 - 主代理读取实际图片、检查质量并定向重试
-- 输出图片预览、绝对路径、`file:///` 文件链接、目录链接和服务 URL
-- Windows 终端通常可通过 Ctrl+鼠标左键打开链接
+- 输出图片预览、绝对路径、host-dependent 的 `file:///` 便利链接、目录链接和服务 URL
+- 本地 `file://` 链接是否能通过 Ctrl/Cmd+点击打开取决于 Claude Code 渲染器和终端宿主；绝对路径与 `Read` 预览始终是主要结果
 
 ## 结构
 
@@ -111,12 +111,14 @@ plugins/ekko-image-gen/
 
 ```markdown
 - 文件：`D:\project\game\Assets\UI\health-potion.png`
-- [打开图片](file:///D:/project/game/Assets/UI/health-potion.png)
-- [打开所在目录](file:///D:/project/game/Assets/UI/)
+- [尝试打开图片](file:///D:/project/game/Assets/UI/health-potion.png)
+- [尝试打开所在目录](file:///D:/project/game/Assets/UI/)
 - 服务 URL：http://localhost:3050/images/...png
 ```
 
-runner 使用排他写入，不覆盖已有文件；发生同名冲突时自动添加数字后缀。多图 job 还会报告 `requestedCount`、`returnedCount`、`requestCount`、`countSplitUsed` 和 `usageByRequest`。上游短返回会保留已有文件并产生数量告警；后续拆分请求失败，或同一响应中较后的图片解码、下载或写入失败时，job 状态为 `partial`，所有已经成功落盘的图片都会保留并返回可点击路径。
+本地 `file://` 链接是便利信息，不是跨终端保证。Claude Code 全屏渲染器与不同终端宿主对 OSC 8 和本地 URI 的处理可能不同；链接无法打开时仍应使用上方绝对路径。用户明确要求打开文件或目录后，代理可以通过 `Bash` 调用当前平台的正常打开器，但不会在生成完成后自动弹出 GUI 应用。
+
+runner 使用排他写入，不覆盖已有文件；发生同名冲突时自动添加数字后缀。多图 job 还会报告 `requestedCount`、`returnedCount`、`requestCount`、`countSplitUsed` 和 `usageByRequest`。上游短返回会保留已有文件并产生数量告警；后续拆分请求失败，或同一响应中较后的图片解码、下载或写入失败时，job 状态为 `partial`，所有已经成功落盘的图片都会保留并返回本地路径与 host-dependent 便利链接。
 
 ## 输出目录策略
 

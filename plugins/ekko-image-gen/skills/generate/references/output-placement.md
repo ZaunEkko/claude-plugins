@@ -49,8 +49,10 @@ For a user who simply asks for one image:
 - infer a useful destination from the current project;
 - use `generated-images/` only when the image is not yet tied to a project feature;
 - call `Read` on the saved file;
-- return both `[打开图片](file:///...)` and `[打开所在目录](file:///...)` links;
-- mention that Ctrl+click normally opens links in terminal hosts.
+- return the absolute path as the primary portable result;
+- return `[尝试打开图片](file:///...)` and `[尝试打开所在目录](file:///...)` as best-effort convenience links;
+- state that local `file://` handling depends on the Claude Code renderer and terminal host, so Ctrl+click or Cmd+click may do nothing;
+- only offer to invoke the platform's normal file opener when the user explicitly asks; never launch a GUI application automatically.
 
 ## Ambiguity and safety
 
