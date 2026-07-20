@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.1.1 - 2026-07-20
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.12` so version-cached installations receive the portable plugin-root runner path.
+
+### Fixed
+
+- Used the load-time `${CLAUDE_PLUGIN_ROOT}` placeholder in the generate skill and image worker runner commands, instead of relying on an unavailable Bash `$CLAUDE_PLUGIN_ROOT` environment variable that Git Bash resolved under its installation directory.
+
 ## 2.1.0 - 2026-07-20
 
 ### Added
