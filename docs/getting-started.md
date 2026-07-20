@@ -31,6 +31,7 @@ claude plugin marketplace update zaunekko
 
 ```bash
 claude plugin install commit-commands@zaunekko --scope user
+claude plugin install ekko-image-gen@zaunekko --scope user
 ```
 
 作用域：
@@ -46,7 +47,21 @@ claude plugin install commit-commands@zaunekko --scope user
 ```bash
 claude plugin marketplace add --scope local "D:/path/to/claude-plugins"
 claude plugin install commit-commands@zaunekko --scope local
+claude plugin install ekko-image-gen@zaunekko --scope local
 ```
+
+## 配置 `ekko-image-gen`
+
+创建 `%USERPROFILE%\.claude\ekko-image-gen.local.json`（Windows）或 `~/.claude/ekko-image-gen.local.json`：
+
+```json
+{
+  "baseUrl": "https://your-openai-compatible-service.example/v1",
+  "apiKey": "replace-with-local-key"
+}
+```
+
+普通用户只需填写这两个字段。endpoint 可以是 localhost 或第三方 HTTPS 服务；真实 API Key 只在本机配置文件中填写，不要提交到 Git 或粘贴到 Agent 对话。
 
 ## 同名兼容分发
 
@@ -66,6 +81,7 @@ claude plugin enable commit-commands@zaunekko --scope user
 ```bash
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
+claude plugin update ekko-image-gen@zaunekko --scope user
 ```
 
 查看当前状态：
@@ -73,6 +89,7 @@ claude plugin update commit-commands@zaunekko --scope user
 ```bash
 claude plugin list --json
 claude plugin details commit-commands@zaunekko
+claude plugin details ekko-image-gen@zaunekko
 ```
 
 ## 重新加载
@@ -104,5 +121,6 @@ claude plugin marketplace remove zaunekko --scope user
 ## 下一步
 
 - [`commit-commands` 使用指南](commit-commands/README.md)
+- [`ekko-image-gen` 使用指南](ekko-image-gen/README.md)
 - [故障排查](troubleshooting.md)
 - [Trust & Safety](../README.md#️-trust--safety)

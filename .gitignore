@@ -1,5 +1,6 @@
 # Claude Code local/user-specific files
 .claude/*.local.md
+.claude/*.local.json
 .claude/settings.local.json
 /AGENTS.md
 /HANDOFF.local.md

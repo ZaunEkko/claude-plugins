@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Runtime verification recipe for commit-commands hooks and attribution wrapper changes.
+description: Runtime verification recipes for commit-commands hooks and ekko-image-gen CLI behavior.
 ---
 
 # Verify `commit-commands`
@@ -22,3 +22,18 @@ Use an isolated temporary Git repository. Do not change user plugin settings, co
 4. Capture the hook JSON, wrapper output, final commit messages, exit statuses, and before/after commit counts inline.
 
 Hook configuration changes load only in a new Claude Code session. Directly driving the hook CLI verifies the changed script without modifying the active installation.
+
+## Verify `ekko-image-gen`
+
+Use the installed user-scope cache that matches the current source version. Keep outputs in an operating-system temporary directory and never expose the user's API key.
+
+1. Establish the diff with `git diff HEAD --stat`.
+2. Refresh the local marketplace, update `ekko-image-gen@zaunekko`, and compare the source plugin directory with the installed version cache using `git diff --no-index`.
+3. Drive a real scalar-reference edit through the installed CLI. Pass `images` as one string, confirm `mode: "edit"` and `inputCount: 1`, then inspect the generated file with `Read` for reference preservation and the requested visual change.
+4. Drive `maxOutputBytes` through the installed CLI with an isolated local mock Images API and an obviously fake environment API key. Return a generated-image URL that streams beyond the limit; capture `image_too_large`, exit code `1`, and a server close event well before the planned byte count.
+5. Return an oversized chunked Images API JSON body through the installed CLI and the same fake-key local-mock pattern. Capture `response_too_large`, exit code `1`, one upstream request with no retry or model fallback, and a server close event before the planned JSON byte count.
+6. Probe an empty scalar reference (`images: " "`) against an unreachable loopback endpoint. Confirm `invalid_request` occurs before networking instead of silently switching to text generation.
+7. Probe empty `EKKO_IMAGE_GEN_BASE_URL`, `EKKO_IMAGE_GEN_API_KEY`, and `EKKO_IMAGE_GEN_CONFIG` values through the installed CLI with a temporary fake-key config and local mock endpoint. Confirm the file endpoint and key remain effective.
+8. Capture CLI JSON, exit statuses, server byte counts, image paths, and visual observations inline.
+
+Do not use real third-party endpoints for failure probes. Do not place credentials in command arguments, fixtures, logs, prompts, or repository content.

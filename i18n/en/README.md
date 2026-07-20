@@ -2,7 +2,7 @@
 
 # 🧩 Claude Code Plugins
 
-### A personalized plugin marketplace for Claude Code
+### A general-purpose plugin marketplace for Claude Code
 
 *Package useful skills, agents, hooks, MCP configuration, and compatibility commands into installable and verifiable Claude Code capabilities.*
 
@@ -37,6 +37,7 @@ Original plugins normally use the purpose-first name `ekko-<specific-purpose>`. 
 | Plugin | Status | Description | Documentation |
 |---|---|---|---|
 | `commit-commands` | Available · compatibility distribution | Preserves the three official command names, writes the current session model plus optional effort into Git commit attribution, and blocks direct commits from bypassing the wrapper inside Claude Code. | [User guide](docs/commit-commands/README.md) · [Implementation and upstream notes](../../plugins/commit-commands/README.md) |
+| `ekko-image-gen` | Available · original | One command for an OpenAI-compatible Images API on localhost or a third-party HTTPS endpoint, with text-to-image, pasted-reference editing, context-aware project output, bounded leaf workers, visual review, and clickable local files. | [User guide](../../docs/ekko-image-gen/README.md) · [Implementation](../../plugins/ekko-image-gen/README.md) |
 
 `commit-commands` exposes the same namespace as the official distribution. Enable exactly one version in any given scope.
 
@@ -49,6 +50,7 @@ Run these commands in the current session:
 ```text
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
+/plugin install ekko-image-gen@zaunekko
 /reload-plugins
 ```
 
@@ -59,18 +61,17 @@ The `/plugin` command uses Claude Code's built-in plugin interface. Use the CLI 
 Give your Claude Code Agent the repository link and this prompt:
 
 ```text
-Please install this Claude Code plugin marketplace:
+Please install every plugin from this Claude Code marketplace:
 https://github.com/ZaunEkko/claude-plugins
-
-Target plugin: commit-commands@zaunekko
 
 Requirements:
 1. Confirm whether I want user, project, or local scope unless I already specified it.
 2. Modify only the selected scope.
-3. Add and update the zaunekko marketplace, then install and enable the target plugin.
+3. Add and update the zaunekko marketplace, read its current catalog, then install and enable every listed plugin.
 4. If commit-commands@claude-plugins-official is enabled in the same scope, explain the namespace conflict and disable it without uninstalling or deleting it.
-5. Run /reload-plugins in the current session and report the exact commands and results.
-6. Stop for my decision when permission, authentication, or security confirmation is required; do not bypass it.
+5. For ekko-image-gen, check `~/.claude/ekko-image-gen.local.json`. If missing, create a template containing only `baseUrl` and a placeholder `apiKey`, then tell me to edit the local file directly. Never ask me to paste a real API key into the conversation.
+6. Run /reload-plugins and report the exact commands, installation results, and any configuration I still need to fill in.
+7. Stop for my decision when permission, authentication, or security confirmation is required; do not bypass it.
 ```
 
 ### CLI installation
@@ -86,6 +87,7 @@ claude plugin marketplace update zaunekko
 
 ```bash
 claude plugin install commit-commands@zaunekko --scope user
+claude plugin install ekko-image-gen@zaunekko --scope user
 ```
 
 If the official distribution is enabled in the same scope, switch explicitly:
@@ -106,9 +108,23 @@ Refreshing a marketplace and updating an installed plugin are separate operation
 ```bash
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
+claude plugin update ekko-image-gen@zaunekko --scope user
 ```
 
-#### 3. Choose a scope
+#### 3. Configure `ekko-image-gen`
+
+Create `~/.claude/ekko-image-gen.local.json` (`%USERPROFILE%\.claude\ekko-image-gen.local.json` on Windows):
+
+```json
+{
+  "baseUrl": "https://your-openai-compatible-service.example/v1",
+  "apiKey": "replace-with-local-key"
+}
+```
+
+The endpoint may be localhost or a third-party HTTPS service. Do not commit the real key or paste it into an Agent conversation. The default model is `gpt-image-2`, and the runner automatically completes logical multi-image counts after short provider responses.
+
+#### 4. Choose a scope
 
 | Scope | Use case | Settings file |
 |---|---|---|
@@ -125,6 +141,7 @@ Use `--scope local` for local development and same-name compatibility testing so
 | `/commit-commands:commit` | Inspect changes, stage relevant files, and create one commit. |
 | `/commit-commands:commit-push-pr` | Commit, then push, then create a Pull Request in fail-closed order. |
 | `/commit-commands:clean_gone` | Plan deterministic cleanup, request explicit confirmation, then remove only safe branches with an exact missing `refs/remotes/...` upstream and eligible clean worktrees. |
+| `/ekko-image-gen:generate` | Generate or edit images through the configured OpenAI-compatible Images API, then place, inspect, and report local output files in project context. |
 
 Generated attribution looks like:
 

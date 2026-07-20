@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.1.0 - 2026-07-20
+
+### Added
+
+- Added `ekko-image-gen@zaunekko`, an OpenAI-compatible image generation plugin with one skill command for text-to-image and pasted-reference image editing against localhost or third-party HTTPS endpoints.
+- Added context-aware output placement, clickable local file and directory links, direct Claude Code image inspection, bounded parallel leaf workers, parent-agent visual acceptance, and targeted retries.
+- Added a dependency-free Node.js runner with JSON/multipart routing, remote-reference host download, collision-safe writes, API-key redaction, partial-success reporting, and a cross-process global concurrency semaphore.
+- Added provider-defined model fallback with `gpt-image-2` as the public default, UI-derived aspect-ratio and 1K/2K/4K presets, and actual output-dimension reporting when upstream pixels differ from the requested tier.
+- Added isolated tests for generation, image editing, minimal and advanced configuration, output links, collision handling, model fallback, size presets, concurrency limiting, partial success, provider extensions, and secret redaction.
+- Added provider-cap-aware logical image counts through optional `maxImagesPerRequest`, automatic bounded follow-up after short responses, serial within-job request splitting, deterministic multi-file naming, per-request usage records, and preservation of files from partially completed jobs.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.11` so user-scope version-cached installations receive bounded Images API JSON response streaming, non-empty environment override handling, scalar-reference normalization, bounded output downloads, multi-image auto-adaptation, the standard GPT Image request shape, streamed input and timeout limits, official multi-reference multipart fields, 16-aligned presets, secure endpoint validation, strict output-image validation, intra-response partial-file preservation, precise model-fallback classification, correct environment model precedence, and public marketplace documentation.
+
+### Fixed
+
+- Preserved configured aspect-ratio and resolution defaults when a job overrides only one size component, instead of silently falling back to `1:1` or `1k`.
+- Stream-limited Images API JSON response bodies before parsing, deriving each request limit from `maxOutputBytes`, request count, base64 expansion, and a bounded metadata allowance; oversized responses fail once with `response_too_large` instead of retrying or switching models.
+- Ignored empty or whitespace-only `EKKO_IMAGE_GEN_*` overrides so unfilled shell templates cannot replace valid local JSON endpoint, API-key, or advanced settings.
+- Preserved scalar `images` and `referenceImages` values as one-element reference lists instead of silently routing those jobs to text generation.
+- Bounded generated base64 images and streamed image-URL downloads with the configurable `maxOutputBytes` limit.
+- Returned files already written from an upstream response when a later item in that same response fails decoding, downloading, or writing, reporting the job as `partial` with usage and item-index diagnostics.
+- Limited 400/404/422 model fallback to explicit model error codes or strict model-unavailability wording, so content-policy and ordinary parameter errors are not resubmitted to later models.
+- Kept request timeouts active until JSON or image response bodies finish streaming, so a server cannot hold a global slot indefinitely after sending headers.
+- Rejected non-loopback plain HTTP API endpoints before any bearer key, prompt, or reference image can be transmitted.
+- Rejected base64 and URL output payloads whose bytes are not a supported image format instead of writing mislabeled PNG files.
+- Made a non-empty `EKKO_IMAGE_GEN_MODEL` override replace a persisted JSON `models` list unless the plural environment override is also set.
+- Sent multiple edit references through repeated `image[]` multipart fields while preserving the established single-reference `image` compatibility path.
+- Changed the `3:4` and `4:3` 1K presets to `1024x1360` and `1360x1024`, keeping both dimensions divisible by 16 for GPT Image 2 compatibility.
+- Omitted the legacy `response_format` field from standard GPT Image generation and edit requests while retaining support for both `b64_json` and URL responses.
+- Enforced `maxInputBytes` while streaming chunked remote reference images, aborting before an oversized response can be fully buffered in memory.
+- Fixed Windows `commit-commands` wrapper tests to prefer Git Bash from the active Git installation instead of the WSL `bash.exe` shim, while preserving the literal subprocess calls introduced by CodeQL hardening.
+
 ## 2.0.3 - 2026-07-17
 
 ### Added

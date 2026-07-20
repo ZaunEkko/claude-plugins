@@ -1,0 +1,1497 @@
+#!/usr/bin/env node
+
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import { isIP } from "node:net";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const DEFAULT_MODELS = Object.freeze(["gpt-image-2"]);
+
+const SIZE_PRESETS = Object.freeze({
+  "auto@auto": "1024x1024",
+  "1:1@1k": "1024x1024",
+  "2:3@1k": "1024x1536",
+  "3:2@1k": "1536x1024",
+  "3:4@1k": "1024x1360",
+  "4:3@1k": "1360x1024",
+  "9:16@1k": "1088x1920",
+  "16:9@1k": "1920x1088",
+  "1:1@2k": "2048x2048",
+  "16:9@2k": "2560x1440",
+  "9:16@2k": "1440x2560",
+  "16:9@4k": "3840x2160",
+  "9:16@4k": "2160x3840",
+});
+
+const DEFAULT_CONFIG = Object.freeze({
+  baseUrl: "http://localhost:3050/v1",
+  models: DEFAULT_MODELS,
+  size: "1024x1024",
+  quality: "auto",
+  maxConcurrency: 4,
+  maxGlobalConcurrency: 4,
+  maxImagesPerRequest: 4,
+  timeoutMs: 240000,
+  queueTimeoutMs: 600000,
+  maxRetries: 1,
+  maxInputBytes: 25 * 1024 * 1024,
+  maxOutputBytes: 50 * 1024 * 1024,
+});
+
+const JSON_RESPONSE_OVERHEAD_BYTES = 64 * 1024;
+const RETRYABLE_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const MODEL_FALLBACK_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const MODEL_FALLBACK_CLIENT_STATUSES = new Set([400, 404, 422]);
+const MODEL_FALLBACK_CODES = new Set([
+  "deployment_not_available",
+  "deployment_not_found",
+  "deployment_unavailable",
+  "invalid_model",
+  "model_not_available",
+  "model_not_found",
+  "model_not_supported",
+  "model_unavailable",
+  "unknown_model",
+  "unsupported_model",
+]);
+const NON_MODEL_FALLBACK_CODE_PATTERN =
+  /(?:auth|api_?key|permission|content|policy|safety|moderation|invalid_(?:image|size|prompt|dimensions?|quality|count|input))/iu;
+const NON_MODEL_FALLBACK_MESSAGE_PATTERN =
+  /\b(?:content(?: policy)?|safety|moderation|size|dimensions?|quality|prompt|input|parameters?|format|resolution)\b/iu;
+const MODEL_FALLBACK_MESSAGE_PATTERNS = Object.freeze([
+  /\b(?:invalid|unknown|unsupported|unavailable)\s+(?:image\s+)?model\b/iu,
+  /\b(?:model|deployment)\b.{0,120}\b(?:not found|cannot be found|does not exist|not available|unavailable|not supported|unsupported|unknown)\b/iu,
+  /\bno such\s+(?:model|deployment)\b/iu,
+]);
+const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high"]);
+
+class ImageGenError extends Error {
+  constructor(
+    message,
+    { code = "image_gen_error", status = null, details = null, partialFiles = [] } = {},
+  ) {
+    super(message);
+    this.name = "ImageGenError";
+    this.code = code;
+    this.status = status;
+    this.details = details;
+    this.partialFiles = partialFiles;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function boundedInteger(value, fallback, minimum, maximum, field) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new ImageGenError(`${field} must be an integer from ${minimum} to ${maximum}`, {
+      code: "invalid_config",
+    });
+  }
+  return parsed;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map(nonEmptyString).filter(Boolean))];
+}
+
+function normalizeModels(value, fallback = DEFAULT_MODELS) {
+  const raw = Array.isArray(value)
+    ? value
+    : nonEmptyString(value)
+      ? value.split(",")
+      : fallback;
+  const models = uniqueStrings(raw);
+  if (models.length === 0) {
+    throw new ImageGenError("At least one image model is required", { code: "invalid_config" });
+  }
+  if (models.length > 10) {
+    throw new ImageGenError("At most 10 fallback models are supported", { code: "invalid_config" });
+  }
+  return models;
+}
+
+function validatedDimensions(value, field) {
+  const match = /^(\d{2,4})x(\d{2,4})$/u.exec(value);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (width < 64 || width > 4096 || height < 64 || height > 4096) {
+    throw new ImageGenError(`${field} dimensions must be from 64 to 4096 pixels`, {
+      code: "invalid_config",
+    });
+  }
+  return { width, height, size: `${width}x${height}` };
+}
+
+export function resolveSize(value = {}, fallback = DEFAULT_CONFIG.size, field = "size") {
+  const raw = typeof value === "string" ? { size: value } : value ?? {};
+  const explicit = nonEmptyString(raw.size)?.toLowerCase().replace(/\s+/gu, "");
+  const direct = explicit ? validatedDimensions(explicit, field) : null;
+  if (direct) {
+    return { ...direct, aspectRatio: null, resolution: null, preset: null };
+  }
+
+  let aspectRatio = nonEmptyString(raw.aspectRatio)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  let resolution = nonEmptyString(raw.resolution)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  if (explicit) {
+    const label = /^((?:auto)|(?:\d+:\d+))(?:\((1k|2k|4k|auto)\))?$/u.exec(explicit);
+    if (!label) {
+      throw new ImageGenError(`${field} must be WIDTHxHEIGHT or a supported ratio preset`, {
+        code: "invalid_config",
+      });
+    }
+    aspectRatio = label[1];
+    resolution = label[2] ?? resolution;
+  }
+
+  if (!aspectRatio && !resolution) {
+    const fallbackDimensions = validatedDimensions(fallback, field);
+    if (!fallbackDimensions) {
+      throw new ImageGenError(`${field} fallback must be WIDTHxHEIGHT`, { code: "invalid_config" });
+    }
+    return { ...fallbackDimensions, aspectRatio: null, resolution: null, preset: null };
+  }
+
+  aspectRatio ??= "1:1";
+  resolution ??= aspectRatio === "auto" ? "auto" : "1k";
+  const key = `${aspectRatio}@${resolution}`;
+  const preset = SIZE_PRESETS[key];
+  if (!preset) {
+    throw new ImageGenError(
+      `${field} preset ${aspectRatio} (${resolution}) is not exposed by the local image UI`,
+      { code: "invalid_config" },
+    );
+  }
+  const dimensions = validatedDimensions(preset, field);
+  return { ...dimensions, aspectRatio, resolution, preset: key };
+}
+
+function isLoopbackHostname(value) {
+  const hostname = value
+    .replace(/^\[|\]$/gu, "")
+    .replace(/\.$/u, "")
+    .toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "::1") {
+    return true;
+  }
+  return isIP(hostname) === 4 && hostname.split(".")[0] === "127";
+}
+
+export function normalizeBaseUrl(value) {
+  const raw = nonEmptyString(value) ?? DEFAULT_CONFIG.baseUrl;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ImageGenError("baseUrl must be a valid HTTP(S) URL", { code: "invalid_config" });
+  }
+  if (!new Set(["http:", "https:"]).has(parsed.protocol)) {
+    throw new ImageGenError("baseUrl must use HTTP or HTTPS", { code: "invalid_config" });
+  }
+  if (parsed.protocol === "http:" && !isLoopbackHostname(parsed.hostname)) {
+    throw new ImageGenError("baseUrl must use HTTPS unless the host is localhost or loopback", {
+      code: "invalid_config",
+    });
+  }
+  parsed.search = "";
+  parsed.hash = "";
+  parsed.pathname = parsed.pathname.replace(/\/+$/u, "");
+  if (!parsed.pathname || parsed.pathname === "/") {
+    parsed.pathname = "/v1";
+  }
+  return parsed.toString().replace(/\/$/u, "");
+}
+
+function mergeEnvironment(fileConfig, env) {
+  const override = (name, fallback) => nonEmptyString(env[name]) ?? fallback;
+  const environmentModels = nonEmptyString(env.EKKO_IMAGE_GEN_MODELS);
+  const environmentModel = nonEmptyString(env.EKKO_IMAGE_GEN_MODEL);
+  return {
+    ...fileConfig,
+    baseUrl: override("EKKO_IMAGE_GEN_BASE_URL", fileConfig.baseUrl),
+    apiKey: override("EKKO_IMAGE_GEN_API_KEY", fileConfig.apiKey),
+    models: environmentModels ?? (environmentModel ? undefined : fileConfig.models),
+    model: environmentModel ?? fileConfig.model,
+    size: override("EKKO_IMAGE_GEN_SIZE", fileConfig.size),
+    aspectRatio: override("EKKO_IMAGE_GEN_ASPECT_RATIO", fileConfig.aspectRatio),
+    resolution: override("EKKO_IMAGE_GEN_RESOLUTION", fileConfig.resolution),
+    quality: override("EKKO_IMAGE_GEN_QUALITY", fileConfig.quality),
+    maxConcurrency: override("EKKO_IMAGE_GEN_MAX_CONCURRENCY", fileConfig.maxConcurrency),
+    maxGlobalConcurrency: override(
+      "EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY",
+      fileConfig.maxGlobalConcurrency,
+    ),
+    maxImagesPerRequest: override(
+      "EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST",
+      fileConfig.maxImagesPerRequest,
+    ),
+    timeoutMs: override("EKKO_IMAGE_GEN_TIMEOUT_MS", fileConfig.timeoutMs),
+    queueTimeoutMs: override("EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS", fileConfig.queueTimeoutMs),
+    maxRetries: override("EKKO_IMAGE_GEN_MAX_RETRIES", fileConfig.maxRetries),
+    maxInputBytes: override("EKKO_IMAGE_GEN_MAX_INPUT_BYTES", fileConfig.maxInputBytes),
+    maxOutputBytes: override("EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES", fileConfig.maxOutputBytes),
+    runtimeDir: override("EKKO_IMAGE_GEN_RUNTIME_DIR", fileConfig.runtimeDir),
+  };
+}
+
+export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
+  const quality = nonEmptyString(raw.quality) ?? DEFAULT_CONFIG.quality;
+  if (!SUPPORTED_QUALITIES.has(quality)) {
+    throw new ImageGenError("quality must be auto, low, medium, or high", {
+      code: "invalid_config",
+    });
+  }
+
+  const size = resolveSize({
+    size: raw.size,
+    aspectRatio: raw.aspectRatio,
+    resolution: raw.resolution,
+  }, DEFAULT_CONFIG.size, "size");
+  const modelSource = raw.models ?? raw.model;
+
+  return {
+    baseUrl: normalizeBaseUrl(raw.baseUrl),
+    apiKey: nonEmptyString(raw.apiKey),
+    models: normalizeModels(modelSource, DEFAULT_CONFIG.models),
+    size: size.size,
+    aspectRatio: size.aspectRatio,
+    resolution: size.resolution,
+    quality,
+    maxConcurrency: boundedInteger(
+      raw.maxConcurrency,
+      DEFAULT_CONFIG.maxConcurrency,
+      1,
+      16,
+      "maxConcurrency",
+    ),
+    maxGlobalConcurrency: boundedInteger(
+      raw.maxGlobalConcurrency,
+      raw.maxConcurrency ?? DEFAULT_CONFIG.maxGlobalConcurrency,
+      1,
+      32,
+      "maxGlobalConcurrency",
+    ),
+    maxImagesPerRequest: boundedInteger(
+      raw.maxImagesPerRequest,
+      DEFAULT_CONFIG.maxImagesPerRequest,
+      1,
+      4,
+      "maxImagesPerRequest",
+    ),
+    timeoutMs: boundedInteger(raw.timeoutMs, DEFAULT_CONFIG.timeoutMs, 5000, 600000, "timeoutMs"),
+    queueTimeoutMs: boundedInteger(
+      raw.queueTimeoutMs,
+      DEFAULT_CONFIG.queueTimeoutMs,
+      5000,
+      3600000,
+      "queueTimeoutMs",
+    ),
+    maxRetries: boundedInteger(raw.maxRetries, DEFAULT_CONFIG.maxRetries, 0, 5, "maxRetries"),
+    maxInputBytes: boundedInteger(
+      raw.maxInputBytes,
+      DEFAULT_CONFIG.maxInputBytes,
+      1024,
+      100 * 1024 * 1024,
+      "maxInputBytes",
+    ),
+    maxOutputBytes: boundedInteger(
+      raw.maxOutputBytes,
+      DEFAULT_CONFIG.maxOutputBytes,
+      1024,
+      200 * 1024 * 1024,
+      "maxOutputBytes",
+    ),
+    runtimeDir: path.resolve(
+      nonEmptyString(raw.runtimeDir) ?? path.join(homeDir, ".claude", "ekko-image-gen", "runtime"),
+    ),
+  };
+}
+
+export async function loadConfig({ env = process.env, homeDir = os.homedir(), configPath } = {}) {
+  const environmentConfigPath = nonEmptyString(env.EKKO_IMAGE_GEN_CONFIG);
+  const resolvedPath = path.resolve(
+    configPath ??
+      environmentConfigPath ??
+      path.join(homeDir, ".claude", "ekko-image-gen.local.json"),
+  );
+  let fileConfig = {};
+  try {
+    fileConfig = JSON.parse(await fs.readFile(resolvedPath, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      if (error instanceof SyntaxError) {
+        throw new ImageGenError(`Invalid JSON in ${resolvedPath}`, { code: "invalid_config" });
+      }
+      throw error;
+    }
+  }
+  return normalizeConfig(mergeEnvironment(fileConfig, env), { homeDir });
+}
+
+export function sanitizeBaseName(value, fallback = "generated-image") {
+  const normalized = (nonEmptyString(value) ?? fallback)
+    .normalize("NFKC")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/gu, "-")
+    .replace(/\s+/gu, "-")
+    .replace(/-+/gu, "-")
+    .replace(/^[. -]+|[. -]+$/gu, "")
+    .slice(0, 96);
+  return normalized || fallback;
+}
+
+function normalizeImageValues(value) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function normalizeImageSource(value) {
+  if (typeof value === "string") {
+    const source = nonEmptyString(value);
+    if (!source) {
+      throw new ImageGenError("Image reference strings must not be empty", {
+        code: "invalid_request",
+      });
+    }
+    return { source, name: null };
+  }
+  if (!value || typeof value !== "object") {
+    throw new ImageGenError("Each image reference must be a path, URL, or image object", {
+      code: "invalid_request",
+    });
+  }
+  const source = nonEmptyString(value.source) ?? nonEmptyString(value.path) ?? nonEmptyString(value.url);
+  if (!source) {
+    throw new ImageGenError("Image objects require source, path, or url", {
+      code: "invalid_request",
+    });
+  }
+  return { source, name: nonEmptyString(value.name) };
+}
+
+function normalizeJob(raw, index, config, cwd) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ImageGenError(`jobs[${index}] must be an object`, { code: "invalid_request" });
+  }
+  const prompt = nonEmptyString(raw.prompt);
+  if (!prompt) {
+    throw new ImageGenError(`jobs[${index}].prompt is required`, { code: "invalid_request" });
+  }
+
+  const id = sanitizeBaseName(raw.id, `image-job-${index + 1}`);
+  const count = boundedInteger(raw.count ?? raw.n, 1, 1, 4, `jobs[${index}].count`);
+  const quality = nonEmptyString(raw.quality) ?? config.quality;
+  if (!SUPPORTED_QUALITIES.has(quality)) {
+    throw new ImageGenError(`jobs[${index}].quality must be auto, low, medium, or high`, {
+      code: "invalid_request",
+    });
+  }
+  const requestedSize = nonEmptyString(raw.size)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  const requestedAspectRatio =
+    nonEmptyString(raw.aspectRatio)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  const requestedResolution =
+    nonEmptyString(raw.resolution)?.toLowerCase().replace(/\s+/gu, "") ?? null;
+  const requestedPreset =
+    /^((?:auto)|(?:\d+:\d+))(?:\((1k|2k|4k|auto)\))?$/u.exec(requestedSize ?? "");
+  const effectiveRequestedAspectRatio = requestedPreset?.[1] ?? requestedAspectRatio;
+  const effectiveRequestedResolution = requestedPreset?.[2] ?? requestedResolution;
+  const fallbackAspectRatio =
+    effectiveRequestedResolution &&
+    effectiveRequestedResolution !== "auto" &&
+    config.aspectRatio === "auto"
+      ? null
+      : config.aspectRatio;
+  const fallbackResolution =
+    effectiveRequestedAspectRatio &&
+    effectiveRequestedAspectRatio !== "auto" &&
+    config.resolution === "auto"
+      ? null
+      : config.resolution;
+  const size = resolveSize({
+    size: requestedSize,
+    aspectRatio: requestedAspectRatio
+      ?? (effectiveRequestedResolution === "auto" ? "auto" : fallbackAspectRatio),
+    resolution: requestedResolution
+      ?? (effectiveRequestedAspectRatio === "auto" ? "auto" : fallbackResolution),
+  }, config.size, `jobs[${index}].size`);
+
+  let models;
+  if (Array.isArray(raw.models)) {
+    models = normalizeModels(raw.models);
+  } else if (nonEmptyString(raw.model)) {
+    models = raw.strictModel === true
+      ? normalizeModels([raw.model])
+      : uniqueStrings([raw.model, ...config.models]);
+  } else {
+    models = [...config.models];
+  }
+
+  const explicitOutput = nonEmptyString(raw.output);
+  let outputDir;
+  let outputName;
+  if (explicitOutput) {
+    const resolvedOutput = path.resolve(cwd, explicitOutput);
+    outputDir = path.dirname(resolvedOutput);
+    outputName = path.basename(resolvedOutput, path.extname(resolvedOutput));
+  } else {
+    outputDir = path.resolve(cwd, nonEmptyString(raw.outputDir) ?? "generated-images");
+    outputName = nonEmptyString(raw.outputName) ?? id;
+  }
+
+  const images = [
+    ...normalizeImageValues(raw.images),
+    ...normalizeImageValues(raw.referenceImages),
+  ];
+  if (images.length > 10) {
+    throw new ImageGenError(`jobs[${index}] supports at most 10 reference images`, {
+      code: "invalid_request",
+    });
+  }
+
+  const historyDisabled = raw.historyDisabled;
+  if (historyDisabled !== undefined && typeof historyDisabled !== "boolean") {
+    throw new ImageGenError(`jobs[${index}].historyDisabled must be a boolean`, {
+      code: "invalid_request",
+    });
+  }
+
+  return {
+    id,
+    prompt,
+    images: images.map(normalizeImageSource),
+    outputDir,
+    outputName: sanitizeBaseName(outputName, id),
+    models,
+    size: size.size,
+    aspectRatio: size.aspectRatio,
+    resolution: size.resolution,
+    quality,
+    count,
+    historyDisabled: typeof historyDisabled === "boolean" ? historyDisabled : null,
+  };
+}
+
+export function normalizeRequest(payload, config, { cwd = process.cwd() } = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new ImageGenError("Request payload must be a JSON object", { code: "invalid_request" });
+  }
+  const rawJobs = Array.isArray(payload.jobs) ? payload.jobs : [payload];
+  if (rawJobs.length === 0) {
+    throw new ImageGenError("At least one image job is required", { code: "invalid_request" });
+  }
+  if (rawJobs.length > 100) {
+    throw new ImageGenError("A single invocation supports at most 100 jobs", {
+      code: "invalid_request",
+    });
+  }
+  return {
+    concurrency: boundedInteger(
+      payload.concurrency,
+      Math.min(config.maxConcurrency, rawJobs.length),
+      1,
+      config.maxConcurrency,
+      "concurrency",
+    ),
+    jobs: rawJobs.map((job, index) => normalizeJob(job, index, config, cwd)),
+  };
+}
+
+function detectImageMime(bytes) {
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))) {
+    return "image/gif";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  if (bytes.length >= 2 && bytes.subarray(0, 2).toString("ascii") === "BM") {
+    return "image/bmp";
+  }
+  return null;
+}
+
+export function imageDimensions(bytes, mime = detectImageMime(bytes)) {
+  if (mime === "image/png" && bytes.length >= 24) {
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (mime === "image/gif" && bytes.length >= 10) {
+    return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) };
+  }
+  if (mime === "image/bmp" && bytes.length >= 26) {
+    return { width: Math.abs(bytes.readInt32LE(18)), height: Math.abs(bytes.readInt32LE(22)) };
+  }
+  if (mime === "image/webp" && bytes.length >= 30) {
+    const chunk = bytes.subarray(12, 16).toString("ascii");
+    if (chunk === "VP8X") {
+      return {
+        width: 1 + bytes.readUIntLE(24, 3),
+        height: 1 + bytes.readUIntLE(27, 3),
+      };
+    }
+    if (chunk === "VP8 " && bytes.length >= 30) {
+      return {
+        width: bytes.readUInt16LE(26) & 0x3fff,
+        height: bytes.readUInt16LE(28) & 0x3fff,
+      };
+    }
+  }
+  if (mime === "image/jpeg") {
+    const startOfFrame = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    let offset = 2;
+    while (offset + 8 < bytes.length) {
+      if (bytes[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = bytes[offset + 1];
+      if (startOfFrame.has(marker)) {
+        return { width: bytes.readUInt16BE(offset + 7), height: bytes.readUInt16BE(offset + 5) };
+      }
+      if (marker === 0xd8 || marker === 0xd9 || marker >= 0xd0 && marker <= 0xd7) {
+        offset += 2;
+        continue;
+      }
+      const length = bytes.readUInt16BE(offset + 2);
+      if (length < 2) {
+        break;
+      }
+      offset += 2 + length;
+    }
+  }
+  return { width: null, height: null };
+}
+
+function extensionForMime(mime) {
+  return new Map([
+    ["image/png", ".png"],
+    ["image/jpeg", ".jpg"],
+    ["image/gif", ".gif"],
+    ["image/webp", ".webp"],
+    ["image/bmp", ".bmp"],
+  ]).get(mime) ?? ".png";
+}
+
+async function fetchWithTimeout(fetchImpl, url, options, timeoutMs, consumeResponse) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    return await consumeResponse(response);
+  } catch (error) {
+    if (timedOut) {
+      throw new ImageGenError("Request timed out while receiving the response", {
+        code: "request_timeout",
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readResponseBytes(
+  response,
+  maximumBytes,
+  tooLargeMessage,
+  { code = "image_too_large", status = null } = {},
+) {
+  const declaredLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    throw new ImageGenError(tooLargeMessage, { code, status });
+  }
+
+  if (!response.body || typeof response.body.getReader !== "function") {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > maximumBytes) {
+      throw new ImageGenError(tooLargeMessage, { code, status });
+    }
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      const chunk = Buffer.from(value);
+      totalBytes += chunk.length;
+      if (totalBytes > maximumBytes) {
+        await reader.cancel().catch(() => {});
+        throw new ImageGenError(tooLargeMessage, { code, status });
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, totalBytes);
+}
+
+async function loadImageBytes(image, config, fetchImpl, cwd) {
+  const source = image.source;
+  let bytes;
+  let sourceName = image.name;
+
+  if (/^data:image\//iu.test(source)) {
+    const match = /^data:([^;,]+);base64,(.+)$/isu.exec(source);
+    if (!match) {
+      throw new ImageGenError("Only base64 image data URLs are supported", {
+        code: "invalid_image",
+      });
+    }
+    bytes = Buffer.from(match[2], "base64");
+    sourceName ??= `reference${extensionForMime(match[1].toLowerCase())}`;
+  } else if (/^https?:\/\//iu.test(source)) {
+    bytes = await fetchWithTimeout(
+      fetchImpl,
+      source,
+      {},
+      config.timeoutMs,
+      async (response) => {
+        if (!response.ok) {
+          throw new ImageGenError(`Reference image download failed with HTTP ${response.status}`, {
+            code: "image_download_failed",
+            status: response.status,
+          });
+        }
+        return readResponseBytes(
+          response,
+          config.maxInputBytes,
+          "Reference image exceeds maxInputBytes",
+        );
+      },
+    );
+    if (!sourceName) {
+      const parsed = new URL(source);
+      sourceName = path.basename(decodeURIComponent(parsed.pathname)) || "reference-image";
+    }
+  } else {
+    let filePath;
+    try {
+      filePath = source.startsWith("file:") ? fileURLToPath(source) : path.resolve(cwd, source);
+    } catch {
+      throw new ImageGenError(`Invalid reference image path: ${source}`, {
+        code: "invalid_image",
+      });
+    }
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
+      throw new ImageGenError(`Reference image is not a file: ${filePath}`, {
+        code: "invalid_image",
+      });
+    }
+    if (stat.size > config.maxInputBytes) {
+      throw new ImageGenError(`Reference image exceeds maxInputBytes: ${filePath}`, {
+        code: "image_too_large",
+      });
+    }
+    bytes = await fs.readFile(filePath);
+    sourceName ??= path.basename(filePath);
+  }
+
+  if (bytes.length === 0 || bytes.length > config.maxInputBytes) {
+    throw new ImageGenError("Reference image is empty or too large", { code: "image_too_large" });
+  }
+  const mime = detectImageMime(bytes);
+  if (!mime) {
+    throw new ImageGenError("Reference input is not a supported PNG, JPEG, GIF, WebP, or BMP image", {
+      code: "invalid_image",
+    });
+  }
+  const parsedName = path.parse(sourceName ?? "reference-image");
+  return {
+    bytes,
+    mime,
+    name: sanitizeBaseName(parsedName.name, "reference-image") + extensionForMime(mime),
+  };
+}
+
+async function removeStaleSlot(slotPath, staleMs) {
+  try {
+    const stat = await fs.stat(slotPath);
+    if (Date.now() - stat.mtimeMs > staleMs) {
+      await fs.rm(slotPath, { recursive: true, force: true });
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+async function acquireGlobalSlot(config) {
+  const lockRoot = path.join(config.runtimeDir, "slots");
+  await fs.mkdir(lockRoot, { recursive: true });
+  const startedAt = Date.now();
+  const staleMs = Math.max(
+    300000,
+    config.timeoutMs * (config.maxRetries + 1) + 120000,
+  );
+
+  while (Date.now() - startedAt <= config.queueTimeoutMs) {
+    for (let index = 0; index < config.maxGlobalConcurrency; index += 1) {
+      const slotPath = path.join(lockRoot, `slot-${index}`);
+      try {
+        await fs.mkdir(slotPath);
+        await fs.writeFile(
+          path.join(slotPath, "owner.json"),
+          `${JSON.stringify({ pid: process.pid, id: randomUUID(), acquiredAt: new Date().toISOString() })}\n`,
+          "utf8",
+        );
+        let released = false;
+        return async () => {
+          if (!released) {
+            released = true;
+            await fs.rm(slotPath, { recursive: true, force: true });
+          }
+        };
+      } catch (error) {
+        if (error.code !== "EEXIST") {
+          throw error;
+        }
+        await removeStaleSlot(slotPath, staleMs);
+      }
+    }
+    await sleep(125);
+  }
+  throw new ImageGenError("Timed out waiting for a global image-generation slot", {
+    code: "queue_timeout",
+  });
+}
+
+function redact(value, apiKey) {
+  const text = String(value ?? "");
+  return apiKey ? text.split(apiKey).join("[REDACTED]") : text;
+}
+
+function normalizeErrorCode(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+}
+
+function shouldFallbackModel(error) {
+  if (MODEL_FALLBACK_STATUSES.has(error.status)) {
+    return true;
+  }
+  if (!MODEL_FALLBACK_CLIENT_STATUSES.has(error.status)) {
+    return false;
+  }
+
+  const code = normalizeErrorCode(error.code);
+  if (NON_MODEL_FALLBACK_CODE_PATTERN.test(code)) {
+    return false;
+  }
+  if (MODEL_FALLBACK_CODES.has(code)) {
+    return true;
+  }
+
+  const message = String(error.message ?? "");
+  if (NON_MODEL_FALLBACK_MESSAGE_PATTERN.test(message)) {
+    return false;
+  }
+  return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function jsonResponseLimit(config, count) {
+  const encodedImageBytes = Math.ceil(config.maxOutputBytes / 3) * 4;
+  return encodedImageBytes * count + JSON_RESPONSE_OVERHEAD_BYTES;
+}
+
+async function parseResponse(response, maximumBytes) {
+  const bytes = await readResponseBytes(
+    response,
+    maximumBytes,
+    "Image service JSON response exceeds the bounded response limit",
+    { code: "response_too_large" },
+  );
+  const text = bytes.toString("utf8");
+  if (!text) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ImageGenError(`Image service returned non-JSON data: ${text.slice(0, 300)}`, {
+      code: "invalid_response",
+      status: response.status,
+    });
+  }
+}
+
+async function callApi(endpoint, buildRequest, config, fetchImpl, responseLimitBytes) {
+  const url = `${config.baseUrl}${endpoint}`;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= config.maxRetries; attempt += 1) {
+    const release = await acquireGlobalSlot(config);
+    try {
+      const request = buildRequest();
+      const { response, body } = await fetchWithTimeout(
+        fetchImpl,
+        url,
+        {
+          method: "POST",
+          ...request,
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            ...(request.headers ?? {}),
+          },
+        },
+        config.timeoutMs,
+        async (response) => ({
+          response,
+          body: await parseResponse(response, responseLimitBytes),
+        }),
+      );
+      if (response.ok) {
+        return body;
+      }
+      const message = redact(body?.error?.message ?? body?.detail ?? `HTTP ${response.status}`, config.apiKey);
+      lastError = new ImageGenError(message, {
+        code: body?.error?.code ?? "api_error",
+        status: response.status,
+      });
+      if (!RETRYABLE_STATUSES.has(response.status) || attempt === config.maxRetries) {
+        throw lastError;
+      }
+    } catch (error) {
+      lastError = error instanceof ImageGenError
+        ? error
+        : new ImageGenError(redact(error.message, config.apiKey), { code: "network_error" });
+      if (
+        lastError.code === "response_too_large" ||
+        attempt === config.maxRetries ||
+        lastError.status && !RETRYABLE_STATUSES.has(lastError.status)
+      ) {
+        throw lastError;
+      }
+    } finally {
+      await release();
+    }
+    await sleep(Math.min(2000, 250 * 2 ** attempt));
+  }
+  throw lastError;
+}
+
+function splitRequestCounts(total, maximum) {
+  const counts = [];
+  for (let remaining = total; remaining > 0; remaining -= maximum) {
+    counts.push(Math.min(remaining, maximum));
+  }
+  return counts;
+}
+
+function generationBody(job, model, count) {
+  const body = {
+    model,
+    prompt: job.prompt,
+    n: count,
+    size: job.size,
+    quality: job.quality,
+  };
+  if (job.historyDisabled !== null) {
+    body.history_disabled = job.historyDisabled;
+  }
+  return body;
+}
+
+function editBody(job, inputs, model, count) {
+  const form = new FormData();
+  form.append("model", model);
+  form.append("prompt", job.prompt);
+  form.append("n", String(count));
+  form.append("size", job.size);
+  form.append("quality", job.quality);
+  const imageField = inputs.length > 1 ? "image[]" : "image";
+  for (const input of inputs) {
+    form.append(imageField, new Blob([input.bytes], { type: input.mime }), input.name);
+  }
+  return form;
+}
+
+async function requestImageChunk(job, inputs, mode, model, count, config, fetchImpl) {
+  const responseLimitBytes = jsonResponseLimit(config, count);
+  return mode === "generate"
+    ? callApi(
+        "/images/generations",
+        () => ({
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(generationBody(job, model, count)),
+        }),
+        config,
+        fetchImpl,
+        responseLimitBytes,
+      )
+    : callApi(
+        "/images/edits",
+        () => ({ body: editBody(job, inputs, model, count) }),
+        config,
+        fetchImpl,
+        responseLimitBytes,
+      );
+}
+
+function validatedResponseImage(bytes, message) {
+  const mime = detectImageMime(bytes);
+  if (!mime) {
+    throw new ImageGenError(message, { code: "invalid_response" });
+  }
+  return { bytes, mime };
+}
+
+async function responseItemBytes(item, config, fetchImpl) {
+  if (nonEmptyString(item?.b64_json)) {
+    const raw = item.b64_json.replace(/^data:[^;,]+;base64,/iu, "");
+    const bytes = Buffer.from(raw, "base64");
+    if (bytes.length > config.maxOutputBytes) {
+      throw new ImageGenError("Generated image exceeds maxOutputBytes", {
+        code: "image_too_large",
+      });
+    }
+    return validatedResponseImage(
+      bytes,
+      "Image service returned base64 data that is not a supported image",
+    );
+  }
+  if (nonEmptyString(item?.url)) {
+    return fetchWithTimeout(
+      fetchImpl,
+      item.url,
+      {},
+      config.timeoutMs,
+      async (response) => {
+        if (!response.ok) {
+          throw new ImageGenError(`Generated image download failed with HTTP ${response.status}`, {
+            code: "image_download_failed",
+            status: response.status,
+          });
+        }
+        const bytes = await readResponseBytes(
+          response,
+          config.maxOutputBytes,
+          "Generated image exceeds maxOutputBytes",
+        );
+        return validatedResponseImage(
+          bytes,
+          "Generated image URL returned data that is not a supported image",
+        );
+      },
+    );
+  }
+  throw new ImageGenError("Image response contains neither b64_json nor url", {
+    code: "invalid_response",
+  });
+}
+
+async function writeUniqueFile(outputDir, baseName, index, total, extension, bytes) {
+  await fs.mkdir(outputDir, { recursive: true });
+  const indexedBase = total > 1 ? `${baseName}-${index + 1}` : baseName;
+  for (let collision = 0; collision < 10000; collision += 1) {
+    const suffix = collision === 0 ? "" : `-${collision + 1}`;
+    const filePath = path.join(outputDir, `${indexedBase}${suffix}${extension}`);
+    try {
+      await fs.writeFile(filePath, bytes, { flag: "wx" });
+      return filePath;
+    } catch (error) {
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
+    }
+  }
+  throw new ImageGenError(`Could not allocate a unique file name in ${outputDir}`, {
+    code: "output_collision",
+  });
+}
+
+async function persistResponse(
+  job,
+  body,
+  config,
+  fetchImpl,
+  { startIndex = 0, totalRequested = body?.data?.length ?? 1, limit = null } = {},
+) {
+  if (!Array.isArray(body?.data) || body.data.length === 0) {
+    throw new ImageGenError("Image service returned no image data", { code: "invalid_response" });
+  }
+  const items = limit === null ? body.data : body.data.slice(0, limit);
+  if (items.length === 0) {
+    throw new ImageGenError("Image service returned no usable image data", { code: "invalid_response" });
+  }
+  const requested = validatedDimensions(job.size, "size");
+  const files = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    try {
+      const resolved = await responseItemBytes(item, config, fetchImpl);
+      const dimensions = imageDimensions(resolved.bytes, resolved.mime);
+      const filePath = await writeUniqueFile(
+        job.outputDir,
+        job.outputName,
+        startIndex + index,
+        totalRequested,
+        extensionForMime(resolved.mime),
+        resolved.bytes,
+      );
+      const absolutePath = path.resolve(filePath);
+      const directory = path.dirname(absolutePath);
+      files.push({
+        path: absolutePath,
+        fileUrl: pathToFileURL(absolutePath).href,
+        directory,
+        directoryUrl: pathToFileURL(`${directory}${path.sep}`).href,
+        serviceUrl: nonEmptyString(item.url),
+        revisedPrompt: nonEmptyString(item.revised_prompt),
+        bytes: resolved.bytes.length,
+        width: dimensions.width,
+        height: dimensions.height,
+        requestedWidth: requested.width,
+        requestedHeight: requested.height,
+        sizeMatched: dimensions.width === null || dimensions.height === null
+          ? null
+          : dimensions.width === requested.width && dimensions.height === requested.height,
+      });
+    } catch (error) {
+      throw new ImageGenError(error.message, {
+        code: error.code,
+        status: error.status,
+        details: {
+          ...(error.details && typeof error.details === "object" ? error.details : {}),
+          responseItemIndex: index + 1,
+          outputIndex: startIndex + index + 1,
+        },
+        partialFiles: files,
+      });
+    }
+  }
+  return files;
+}
+
+function buildJobResult(
+  job,
+  {
+    status,
+    mode,
+    selectedModel,
+    modelAttempts,
+    inputCount,
+    startedAt,
+    files,
+    requestCounts,
+    usageByRequest,
+    countWarnings,
+    error = null,
+    apiKey = null,
+  },
+) {
+  const effectiveCountWarnings = [...countWarnings];
+  if (files.length < job.count) {
+    effectiveCountWarnings.push(
+      `Requested ${job.count} images, but ${files.length} were saved across ${usageByRequest.length} upstream requests`,
+    );
+  }
+  const warnings = [
+    ...effectiveCountWarnings,
+    ...files
+      .filter((file) => file.sizeMatched === false)
+      .map((file) =>
+        `Requested ${file.requestedWidth}x${file.requestedHeight}, but the service returned ${file.width}x${file.height}`,
+      ),
+  ];
+  const result = {
+    id: job.id,
+    status,
+    mode,
+    model: selectedModel,
+    requestedModels: job.models,
+    modelAttempts,
+    fallbackUsed: selectedModel !== null && selectedModel !== job.models[0],
+    size: job.size,
+    aspectRatio: job.aspectRatio,
+    resolution: job.resolution,
+    quality: job.quality,
+    inputCount,
+    requestedCount: job.count,
+    returnedCount: files.length,
+    requestCount: usageByRequest.length,
+    countSplitUsed: requestCounts.length > 1,
+    durationMs: Date.now() - startedAt,
+    files,
+    warnings,
+    usage: usageByRequest.length === 1 ? usageByRequest[0].usage : null,
+    usageByRequest,
+  };
+  if (error) {
+    result.error = {
+      code: error.code ?? "image_gen_error",
+      message: redact(error.message, apiKey),
+      status: error.status ?? null,
+      details: error.details ?? null,
+    };
+  }
+  return result;
+}
+
+async function runJob(job, config, fetchImpl, cwd) {
+  const startedAt = Date.now();
+  const inputs = await Promise.all(
+    job.images.map((image) => loadImageBytes(image, config, fetchImpl, cwd)),
+  );
+  const mode = inputs.length > 0 ? "edit" : "generate";
+  const requestCounts = splitRequestCounts(job.count, config.maxImagesPerRequest);
+  const modelAttempts = [];
+  const files = [];
+  const usageByRequest = [];
+  const countWarnings = [];
+  let selectedModel = null;
+
+  for (let requestIndex = 0; requestIndex < requestCounts.length; requestIndex += 1) {
+    const requestedCount = requestCounts[requestIndex];
+    let body = null;
+
+    if (requestIndex === 0) {
+      for (let modelIndex = 0; modelIndex < job.models.length; modelIndex += 1) {
+        const model = job.models[modelIndex];
+        try {
+          body = await requestImageChunk(
+            job,
+            inputs,
+            mode,
+            model,
+            requestedCount,
+            config,
+            fetchImpl,
+          );
+          selectedModel = model;
+          modelAttempts.push({ model, status: "ok", code: null, httpStatus: 200 });
+          break;
+        } catch (error) {
+          modelAttempts.push({
+            model,
+            status: "error",
+            code: error.code ?? "image_gen_error",
+            httpStatus: error.status ?? null,
+          });
+          if (modelIndex === job.models.length - 1 || !shouldFallbackModel(error)) {
+            throw new ImageGenError(error.message, {
+              code: error.code,
+              status: error.status,
+              details: { modelAttempts },
+            });
+          }
+        }
+      }
+    } else {
+      try {
+        body = await requestImageChunk(
+          job,
+          inputs,
+          mode,
+          selectedModel,
+          requestedCount,
+          config,
+          fetchImpl,
+        );
+      } catch (error) {
+        return buildJobResult(job, {
+          status: "partial",
+          mode,
+          selectedModel,
+          modelAttempts,
+          inputCount: inputs.length,
+          startedAt,
+          files,
+          requestCounts,
+          usageByRequest,
+          countWarnings,
+          error: new ImageGenError(error.message, {
+            code: error.code,
+            status: error.status,
+            details: {
+              ...(error.details && typeof error.details === "object" ? error.details : {}),
+              requestIndex: requestIndex + 1,
+              requestedCount,
+              model: selectedModel,
+            },
+          }),
+          apiKey: config.apiKey,
+        });
+      }
+    }
+
+    const serviceReturnedCount = Array.isArray(body?.data) ? body.data.length : 0;
+    let chunkFiles;
+    try {
+      chunkFiles = await persistResponse(job, body, config, fetchImpl, {
+        startIndex: files.length,
+        totalRequested: job.count,
+        limit: requestedCount,
+      });
+    } catch (error) {
+      const partialChunkFiles = Array.isArray(error.partialFiles) ? error.partialFiles : [];
+      if (partialChunkFiles.length > 0) {
+        const failedItemIndex =
+          error.details?.responseItemIndex ?? (partialChunkFiles.length + 1);
+        files.push(...partialChunkFiles);
+        usageByRequest.push({
+          requestIndex: requestIndex + 1,
+          requestedCount,
+          returnedCount: partialChunkFiles.length,
+          serviceReturnedCount,
+          usage: body?.usage ?? null,
+        });
+        countWarnings.push(
+          `Saved ${partialChunkFiles.length} image(s) from upstream request ${requestIndex + 1} before response item ${failedItemIndex} failed`,
+        );
+      }
+      if (files.length === 0) {
+        throw new ImageGenError(error.message, {
+          code: error.code,
+          status: error.status,
+          details: {
+            ...(error.details && typeof error.details === "object" ? error.details : {}),
+            modelAttempts,
+          },
+        });
+      }
+      return buildJobResult(job, {
+        status: "partial",
+        mode,
+        selectedModel,
+        modelAttempts,
+        inputCount: inputs.length,
+        startedAt,
+        files,
+        requestCounts,
+        usageByRequest,
+        countWarnings,
+        error: new ImageGenError(error.message, {
+          code: error.code,
+          status: error.status,
+          details: {
+            ...(error.details && typeof error.details === "object" ? error.details : {}),
+            requestIndex: requestIndex + 1,
+            requestedCount,
+            model: selectedModel,
+          },
+        }),
+        apiKey: config.apiKey,
+      });
+    }
+
+    files.push(...chunkFiles);
+    usageByRequest.push({
+      requestIndex: requestIndex + 1,
+      requestedCount,
+      returnedCount: chunkFiles.length,
+      serviceReturnedCount,
+      usage: body?.usage ?? null,
+    });
+    if (serviceReturnedCount < requestedCount) {
+      const remainingCount = job.count - files.length;
+      const inferredCap = Math.max(1, chunkFiles.length);
+      if (remainingCount > 0) {
+        const recoveryCounts = splitRequestCounts(remainingCount, inferredCap);
+        requestCounts.splice(
+          requestIndex + 1,
+          requestCounts.length - requestIndex - 1,
+          ...recoveryCounts,
+        );
+        countWarnings.push(
+          `Requested ${requestedCount} images in upstream request ${requestIndex + 1}, but the service returned ${serviceReturnedCount}; scheduled ${recoveryCounts.length} bounded follow-up request(s) for the remaining ${remainingCount}`,
+        );
+      } else {
+        countWarnings.push(
+          `Requested ${requestedCount} images in upstream request ${requestIndex + 1}, but the service returned ${serviceReturnedCount}`,
+        );
+      }
+    } else if (serviceReturnedCount > requestedCount) {
+      countWarnings.push(
+        `Requested ${requestedCount} images in upstream request ${requestIndex + 1}, but the service returned ${serviceReturnedCount}; saved the first ${requestedCount}`,
+      );
+    }
+  }
+
+  return buildJobResult(job, {
+    status: "ok",
+    mode,
+    selectedModel,
+    modelAttempts,
+    inputCount: inputs.length,
+    startedAt,
+    files,
+    requestCounts,
+    usageByRequest,
+    countWarnings,
+  });
+}
+
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function consume() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, consume));
+  return results;
+}
+
+function errorResult(job, error, apiKey) {
+  return {
+    id: job.id,
+    status: "error",
+    error: {
+      code: error.code ?? "image_gen_error",
+      message: redact(error.message, apiKey),
+      status: error.status ?? null,
+      details: error.details ?? null,
+    },
+  };
+}
+
+export async function runJobs(payload, options = {}) {
+  const cwd = path.resolve(options.cwd ?? process.cwd());
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    throw new ImageGenError("Node.js 18 or newer with fetch support is required", {
+      code: "unsupported_runtime",
+    });
+  }
+  const config = options.config
+    ? normalizeConfig(options.config, { homeDir: options.homeDir ?? os.homedir() })
+    : await loadConfig(options);
+  if (!config.apiKey) {
+    throw new ImageGenError(
+      "Missing API key. Set EKKO_IMAGE_GEN_API_KEY or ~/.claude/ekko-image-gen.local.json",
+      { code: "missing_api_key" },
+    );
+  }
+
+  const request = normalizeRequest(payload, config, { cwd });
+  const startedAt = Date.now();
+  const jobs = await mapLimit(request.jobs, request.concurrency, async (job) => {
+    try {
+      return await runJob(job, config, fetchImpl, cwd);
+    } catch (error) {
+      return errorResult(job, error, config.apiKey);
+    }
+  });
+  const succeeded = jobs.filter((job) => job.status === "ok").length;
+  const partial = jobs.filter((job) => job.status === "partial").length;
+  const failed = jobs.filter((job) => job.status === "error").length;
+  const hasOutput = succeeded + partial > 0;
+  return {
+    status: failed === 0 && partial === 0 ? "ok" : hasOutput ? "partial" : "error",
+    summary: {
+      total: jobs.length,
+      succeeded,
+      partial,
+      failed,
+      durationMs: Date.now() - startedAt,
+      concurrency: request.concurrency,
+      globalConcurrency: config.maxGlobalConcurrency,
+    },
+    jobs,
+  };
+}
+
+function helpText() {
+  return `Usage: node image-gen.mjs [--request FILE]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR.\n`;
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readPayload(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    return { help: true };
+  }
+  const requestIndex = argv.indexOf("--request");
+  if (requestIndex >= 0) {
+    const file = argv[requestIndex + 1];
+    if (!file) {
+      throw new ImageGenError("--request requires a JSON file path", { code: "invalid_request" });
+    }
+    return { payload: JSON.parse(await fs.readFile(path.resolve(file), "utf8")) };
+  }
+  const text = await readStdin();
+  if (!text.trim()) {
+    throw new ImageGenError("Provide a JSON request on stdin or with --request FILE", {
+      code: "invalid_request",
+    });
+  }
+  return { payload: JSON.parse(text) };
+}
+
+export async function main(argv = process.argv.slice(2)) {
+  try {
+    const input = await readPayload(argv);
+    if (input.help) {
+      process.stdout.write(helpText());
+      return 0;
+    }
+    const result = await runJobs(input.payload);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.status === "ok" ? 0 : result.status === "partial" ? 2 : 1;
+  } catch (error) {
+    const result = {
+      status: "error",
+      error: {
+        code: error.code ?? (error instanceof SyntaxError ? "invalid_json" : "image_gen_error"),
+        message: error.message,
+        status: error.status ?? null,
+      },
+    };
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 1;
+  }
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (isMain) {
+  process.exitCode = await main();
+}
