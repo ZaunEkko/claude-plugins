@@ -1275,3 +1275,52 @@ test("classifies upstream errors that only carry an error type", async (t) => {
   assert.equal(job.model, "gpt-image-2");
   assert.equal(job.fallbackUsed, true);
 });
+
+test("reuses the resolved model for later jobs in the same run", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const attempts = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    attempts.push(body.model);
+    if (body.model !== "gpt-image-2") {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "model_not_found", message: "model is not available for this group" },
+      }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    concurrency: 1,
+    jobs: [
+      { id: "first", prompt: "A", outputDir: path.join(directory, "output") },
+      { id: "second", prompt: "B", outputDir: path.join(directory, "output") },
+      { id: "pinned", prompt: "C", outputDir: path.join(directory, "output"), model: "gpt-image-2.5-sunburst" },
+    ],
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"],
+      model: undefined,
+      maxConcurrency: 1,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.deepEqual(
+    result.jobs.map((job) => job.modelAttempts.map((attempt) => attempt.model)),
+    [
+      ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"],
+      ["gpt-image-2"],
+      ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2"],
+    ],
+  );
+  assert.deepEqual(result.jobs.map((job) => job.model), [
+    "gpt-image-2",
+    "gpt-image-2",
+    "gpt-image-2",
+  ]);
+  assert.equal(attempts.length, 7);
+});

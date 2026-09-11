@@ -65,6 +65,8 @@ Some OpenAI-compatible gateways translate Images API calls into a Responses API 
 
 Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default chain is `gpt-image-2.5-flare`, then `gpt-image-2.5-sunburst`, then `gpt-image-2`, so a normal installation omits `models` and an endpoint that exposes only one of those names still resolves through model fallback. Configure an ordered list only when the endpoint uses different names or needs explicit fallback.
 
+The first job that resolves a model through the configured chain records it for the rest of that run, so later jobs start from the model the endpoint actually serves instead of repeating a failed probe per job. A job that names its own `model` or `models` keeps its requested order and is never reordered, which preserves a deliberate per-job quality-tier escalation.
+
 ## Input JSON
 
 Pass JSON through stdin or use `--request <file>`.

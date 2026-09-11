@@ -11,7 +11,8 @@ All notable changes to this project will be documented in this file.
 - Added the GPT Image 2.5 `xhigh` and `max` quality tiers to the accepted `quality` values, which the runner previously rejected locally before the request reached the service.
 - Added per-job model-tier guidance so the orchestrating agent assigns `gpt-image-2.5-sunburst` to hero, high-detail, and identity-preserving edit jobs while bulk batch members stay on the default speed tier, and escalates a single job on a quality-driven review failure instead of rewording alone.
 - Added the producing model and a quality-tier escalation option to the image worker's structured report, so a parent agent can see silent model fallback and act on precision shortfalls.
-- Added isolated tests for the single-image downgrade and for upstream errors that carry only an error `type`.
+- Added a per-run resolved-model memo so the first job that finds a working model in the configured chain spares every later job in that run a repeated failed probe, while a job that names its own `model` or `models` keeps its requested order and its deliberate quality-tier escalation.
+- Added isolated tests for the single-image downgrade, for upstream errors that carry only an error `type`, and for resolved-model reuse across jobs.
 
 ### Changed
 

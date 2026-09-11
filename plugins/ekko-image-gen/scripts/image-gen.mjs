@@ -436,6 +436,7 @@ function normalizeJob(raw, index, config, cwd) {
       ?? (effectiveRequestedAspectRatio === "auto" ? "auto" : fallbackResolution),
   }, config.size, `jobs[${index}].size`);
 
+  const explicitModel = Array.isArray(raw.models) || nonEmptyString(raw.model) !== null;
   let models;
   if (Array.isArray(raw.models)) {
     models = normalizeModels(raw.models);
@@ -483,6 +484,7 @@ function normalizeJob(raw, index, config, cwd) {
     outputDir,
     outputName: sanitizeBaseName(outputName, id),
     models,
+    explicitModel,
     size: size.size,
     aspectRatio: size.aspectRatio,
     resolution: size.resolution,
@@ -831,6 +833,14 @@ function shouldFallbackModel(error) {
     return false;
   }
   return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function orderJobModels(job, runtime) {
+  const resolved = nonEmptyString(runtime.resolvedModel);
+  if (job.explicitModel || !resolved || !job.models.includes(resolved)) {
+    return job.models;
+  }
+  return [resolved, ...job.models.filter((model) => model !== resolved)];
 }
 
 function isMultiImageCountRejection(error, requestedCount) {
@@ -1191,6 +1201,7 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
     job.images.map((image) => loadImageBytes(image, config, fetchImpl, cwd)),
   );
   const mode = inputs.length > 0 ? "edit" : "generate";
+  const orderedModels = orderJobModels(job, runtime);
   const requestCounts = splitRequestCounts(
     job.count,
     runtime.multiImageCap ?? config.maxImagesPerRequest,
@@ -1244,11 +1255,14 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
     };
 
     if (requestIndex === 0) {
-      for (let modelIndex = 0; modelIndex < job.models.length; modelIndex += 1) {
-        const model = job.models[modelIndex];
+      for (let modelIndex = 0; modelIndex < orderedModels.length; modelIndex += 1) {
+        const model = orderedModels[modelIndex];
         try {
           body = await requestChunk(model);
           selectedModel = model;
+          if (!job.explicitModel) {
+            runtime.resolvedModel = model;
+          }
           modelAttempts.push({ model, status: "ok", code: null, httpStatus: 200 });
           break;
         } catch (error) {
@@ -1258,7 +1272,7 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
             code: error.code ?? "image_gen_error",
             httpStatus: error.status ?? null,
           });
-          if (modelIndex === job.models.length - 1 || !shouldFallbackModel(error)) {
+          if (modelIndex === orderedModels.length - 1 || !shouldFallbackModel(error)) {
             throw new ImageGenError(error.message, {
               code: error.code,
               status: error.status,
@@ -1454,7 +1468,7 @@ export async function runJobs(payload, options = {}) {
 
   const request = normalizeRequest(payload, config, { cwd });
   const startedAt = Date.now();
-  const runtime = { multiImageCap: null };
+  const runtime = { multiImageCap: null, resolvedModel: null };
   const jobs = await mapLimit(request.jobs, request.concurrency, async (job) => {
     try {
       return await runJob(job, config, fetchImpl, cwd, runtime);

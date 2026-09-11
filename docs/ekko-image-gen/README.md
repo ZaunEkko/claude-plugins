@@ -39,7 +39,7 @@
 
 如果由 Agent 协助安装，应让 Agent 检查并创建只包含 `baseUrl` 与占位 `apiKey` 的配置模板，然后提示用户直接编辑 `%USERPROFILE%\.claude\ekko-image-gen.local.json`（Windows）或 `~/.claude/ekko-image-gen.local.json`。不要在对话中粘贴 API Key。使用第三方 endpoint 时，提示词和参考图会发送到该第三方服务。
 
-仓库默认模型链为 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2`，普通用户无需填写 `models`。两个 2.5 模型 token 单价相同：`flare` 是速度档，画质对齐 `gpt-image-2`；`sunburst` 是质量档，细节与编辑精度更高。批量素材默认走 `flare`，Agent 会按 job 单独把主视觉、高细节大图、以及需要严格保留参考图特征的编辑升到 `sunburst`，不会整批升档；视觉复核不过且属于画质问题时也会对该 job 升档重试。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。
+仓库默认模型链为 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2`，普通用户无需填写 `models`。两个 2.5 模型 token 单价相同：`flare` 是速度档，画质对齐 `gpt-image-2`；`sunburst` 是质量档，细节与编辑精度更高。批量素材默认走 `flare`，Agent 会按 job 单独把主视觉、高细节大图、以及需要严格保留参考图特征的编辑升到 `sunburst`，不会整批升档；视觉复核不过且属于画质问题时也会对该 job 升档重试。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。同一次运行中，第一个成功命中的模型会被记住，后续 job 直接从该模型开始，不会每个 job 都重复一次失败探测；显式指定了 `model` 的 job 保持自己的优先顺序，升档不受影响。
 
 支持 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` 及相应的 `1k / 2k / 4k` 服务预设，也可传精确 `WIDTHxHEIGHT`。服务可能接受 4K 请求但返回较小的实际像素，部分网关甚至完全忽略 `size`（连方向都由服务决定），最终结果会同时报告请求尺寸和实际尺寸。
 
