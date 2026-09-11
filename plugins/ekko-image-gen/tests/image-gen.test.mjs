@@ -142,7 +142,7 @@ test("documents temporary loopback previews without automatic GUI launch", async
   const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
   const combinedGuidance = [skill, worker, placement, readme, ...publicDocs].join("\n");
 
-  assert.equal(manifest.version, "0.1.14");
+  assert.equal(manifest.version, "0.1.15");
   assert.match(manifest.description, /temporary loopback HTTP preview links/u);
   assert.ok(marketplaceEntry);
   assert.match(marketplaceEntry.description, /temporary loopback HTTP preview links/u);
@@ -232,7 +232,11 @@ test("loads user config and applies environment overrides", async (t) => {
   assert.equal(loaded.maxConcurrency, 2);
   assert.equal(loaded.maxImagesPerRequest, 1);
   assert.equal(loaded.maxOutputBytes, 2048);
-  assert.deepEqual(loaded.models, ["gpt-image-2"]);
+  assert.deepEqual(loaded.models, [
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2",
+  ]);
 
   const emptyOverrideLoaded = await loadConfig({
     configPath,
@@ -299,7 +303,11 @@ test("uses public defaults when configuration contains only endpoint and key", a
   const loaded = await loadConfig({ configPath, homeDir: directory, env: {} });
 
   assert.equal(loaded.baseUrl, "https://images.example.test/v1");
-  assert.deepEqual(loaded.models, ["gpt-image-2"]);
+  assert.deepEqual(loaded.models, [
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2",
+  ]);
   assert.equal(loaded.maxImagesPerRequest, 4);
   assert.equal(loaded.maxOutputBytes, 50 * 1024 * 1024);
 });
@@ -1178,4 +1186,92 @@ test("split requests retain the shared global concurrency limit", async (t) => {
   assert.equal(result.status, "ok");
   assert.equal(requests, 4);
   assert.equal(peak, 1);
+});
+
+test("retries with single-image requests when the service rejects a multi-image count", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const seenCounts = [];
+  const seenModels = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenCounts.push(body.n);
+    seenModels.push(body.model);
+    if (body.n > 1) {
+      response.writeHead(400, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: {
+          code: "unknown_parameter",
+          message: "Unknown parameter: 'tools[0].n'.",
+          param: "tools[0].n",
+          type: "invalid_request_error",
+        },
+      }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "count-rejection",
+    prompt: "A multi-image request",
+    outputDir: path.join(directory, "output"),
+    count: 2,
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["gpt-image-2.5-flare", "gpt-image-2"],
+      model: undefined,
+      maxImagesPerRequest: 4,
+    }),
+  });
+
+  const job = result.jobs[0];
+  assert.equal(result.status, "ok");
+  assert.equal(job.status, "ok");
+  assert.equal(job.files.length, 2);
+  assert.deepEqual(seenCounts, [2, 1, 1]);
+  assert.equal(job.countSplitUsed, true);
+  assert.deepEqual([...new Set(seenModels)], ["gpt-image-2.5-flare"]);
+  assert.equal(job.model, "gpt-image-2.5-flare");
+  assert.equal(job.fallbackUsed, false);
+  assert.ok(job.warnings.some((warning) => warning.includes("retried with one image per upstream request")));
+});
+
+test("classifies upstream errors that only carry an error type", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const seenModels = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenModels.push(body.model);
+    if (body.model === "gpt-image-2.5-flare") {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: {
+          message: 'Model "gpt-image-2.5-flare" is not available for this group',
+          type: "model_not_found",
+        },
+      }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "type-only-error",
+    prompt: "A type-only error",
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: ["gpt-image-2.5-flare", "gpt-image-2"],
+      model: undefined,
+    }),
+  });
+
+  const job = result.jobs[0];
+  assert.equal(result.status, "ok");
+  assert.deepEqual(seenModels, ["gpt-image-2.5-flare", "gpt-image-2"]);
+  assert.equal(job.modelAttempts[0].code, "model_not_found");
+  assert.equal(job.model, "gpt-image-2");
+  assert.equal(job.fallbackUsed, true);
 });

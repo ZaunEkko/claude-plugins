@@ -21,7 +21,7 @@ All remaining fields are optional advanced overrides. Their defaults are shown h
 
 ```json
 {
-  "models": ["gpt-image-2"],
+  "models": ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"],
   "size": "1024x1024",
   "quality": "auto",
   "maxConcurrency": 4,
@@ -59,9 +59,11 @@ The runner reads configuration on every invocation; editing the JSON file does n
 
 `maxImagesPerRequest` is an optional provider capability ceiling from `1` to `4`, not the user's logical variant count. The default is `4`. When an upstream accepts a larger `n` but returns fewer items, the runner infers the effective response size and schedules bounded follow-up requests only for the remaining logical count. Set the field explicitly when the provider's limit is already known and the initial probe should be avoided.
 
+Some OpenAI-compatible gateways translate Images API calls into a Responses API `image_generation` tool and reject `n` outright with a `400` naming the `n` parameter. The runner detects that rejection from the error `param` or message, retries the same upstream request with a single image, and caps every later request in the same run at one image per request. The job records the downgrade as a warning instead of failing.
+
 `maxOutputBytes` limits each decoded base64 image and each generated-image URL download. The default is `52428800` bytes (50 MiB). URL responses are checked by `Content-Length` when available and otherwise streamed under the limit. Before JSON parsing, each Images API response is also streamed under a derived bound: base64 expansion of `maxOutputBytes` multiplied by that upstream request's image count, plus 64 KiB for metadata. Exceeding this bound returns `response_too_large` without retrying or switching models.
 
-Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default is `gpt-image-2`, so normal installations omit `models`; configure an ordered list only when the endpoint uses different names or needs explicit fallback.
+Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default chain is `gpt-image-2.5-flare`, then `gpt-image-2.5-sunburst`, then `gpt-image-2`, so a normal installation omits `models` and an endpoint that exposes only one of those names still resolves through model fallback. Configure an ordered list only when the endpoint uses different names or needs explicit fallback.
 
 ## Input JSON
 
@@ -105,7 +107,7 @@ A single job object without `jobs` is accepted as shorthand.
 | `size` | no | Exact `WIDTHxHEIGHT`, ratio such as `16:9`, or label such as `16:9(4k)`. |
 | `aspectRatio` | no | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, or `auto`. |
 | `resolution` | no | `1k`, `2k`, `4k`, or `auto`; only combinations exposed by the service UI are accepted. |
-| `quality` | no | `auto`, `low`, `medium`, or `high`. |
+| `quality` | no | `auto`, `low`, `medium`, `high`, `xhigh`, or `max`. `xhigh` and `max` are GPT Image 2.5 tiers; services that predate them reject the value upstream. |
 | `count` / `n` | no | Logical images requested for this job, `1-4`; the runner may split them across upstream requests. |
 | `historyDisabled` | no | Provider-specific generation extension. When omitted, the runner does not send `history_disabled`; set a boolean only for services that document support. |
 
@@ -129,7 +131,7 @@ The runner validates uploaded bytes as PNG, JPEG, GIF, WebP, or BMP and refuses 
 | `9:16` / `4k` | `2160x3840` |
 | `auto` | `1024x1024` |
 
-The API may accept a requested tier while returning different actual pixel dimensions. Read `width`, `height`, `requestedWidth`, `requestedHeight`, and `sizeMatched` from every saved file instead of assuming the upstream honored the exact dimensions.
+The API may accept a requested tier while returning different actual pixel dimensions. Some gateways ignore `size` completely, returning their own fixed dimensions and orientation no matter which preset or exact `WIDTHxHEIGHT` value is sent; on those services a portrait request can come back as a landscape image, and the only way to steer composition is the prompt. Read `width`, `height`, `requestedWidth`, `requestedHeight`, and `sizeMatched` from every saved file instead of assuming the upstream honored the exact dimensions.
 
 ## API routing
 

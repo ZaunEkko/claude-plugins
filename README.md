@@ -131,7 +131,7 @@ claude plugin update ekko-image-gen@zaunekko --scope user
 }
 ```
 
-`baseUrl` 可以指向 localhost 或第三方 HTTPS 服务。不要把真实 API Key 提交到 Git，也不要粘贴进 Agent 对话。模型默认使用 `gpt-image-2`；多图短返回由 runner 自动补齐。高级模型 fallback、尺寸和并发配置见 [`ekko-image-gen` 使用指南](docs/ekko-image-gen/README.md)。
+`baseUrl` 可以指向 localhost 或第三方 HTTPS 服务。不要把真实 API Key 提交到 Git，也不要粘贴进 Agent 对话。模型默认走 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2` 回退链；多图短返回或上游拒绝 `n` 参数时由 runner 自动降级补齐。两个 2.5 模型 token 单价相同，`flare` 偏速度、`sunburst` 偏画质，主代理会按素材逐个分档，不整批升档。高级模型 fallback、尺寸、画质档位和并发配置见 [`ekko-image-gen` 使用指南](docs/ekko-image-gen/README.md)。
 
 #### 4. 选择作用域
 
