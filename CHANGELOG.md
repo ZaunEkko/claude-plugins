@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.2.0 - 2026-09-11
+
+### Added
+
+- Added `gpt-image-2.5-flare` and `gpt-image-2.5-sunburst` support to `ekko-image-gen`, and made the repository default an ordered `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2` fallback chain so minimal `baseUrl` plus `apiKey` installations resolve whichever image model their endpoint actually serves.
+- Added runtime recovery for gateways that reject the Images API `n` parameter outright: the runner detects the rejection from the upstream error `param` or message, retries the same request with a single image, caps later requests in the same run at one image, and reports the downgrade as a job warning instead of failing.
+- Added the GPT Image 2.5 `xhigh` and `max` quality tiers to the accepted `quality` values, which the runner previously rejected locally before the request reached the service.
+- Added per-job model-tier guidance so the orchestrating agent assigns `gpt-image-2.5-sunburst` to hero, high-detail, and identity-preserving edit jobs while bulk batch members stay on the default speed tier, and escalates a single job on a quality-driven review failure instead of rewording alone.
+- Added the producing model and a quality-tier escalation option to the image worker's structured report, so a parent agent can see silent model fallback and act on precision shortfalls.
+- Added a per-run resolved-model memo so the first job that finds a working model in the configured chain spares every later job in that run a repeated failed probe, while a job that names its own `model` or `models` keeps its requested order and its deliberate quality-tier escalation.
+- Added isolated tests for the single-image downgrade, for upstream errors that carry only an error `type`, and for resolved-model reuse across jobs.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.15`.
+- Documented that some OpenAI-compatible gateways ignore `size` entirely, returning fixed dimensions and orientation regardless of the requested preset, and instructed the generate skill to report saved dimensions and check `sizeMatched` before claiming a ratio or resolution.
+
+### Fixed
+
+- Classified upstream errors that supply only `error.type` without `error.code`, so gateway responses such as a bare `model_not_found` type are recognized as model-availability failures instead of relying on message-pattern matching alone.
 ## 2.1.3 - 2026-07-20
 
 ### Added

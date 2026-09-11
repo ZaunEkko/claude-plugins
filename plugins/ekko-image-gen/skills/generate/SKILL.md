@@ -3,7 +3,7 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", "打开刚才生成的图片", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns absolute paths plus temporary loopback HTTP preview links that terminal users can Ctrl/Cmd+click without an automatic GUI launch.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.14
+version: 0.1.15
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -60,9 +60,31 @@ Keep style-critical constraints shared across related jobs. Avoid vague prompts 
 
 ## Select model and dimensions
 
-Use the configured model priority. The repository default is `gpt-image-2`; treat model names as provider-defined and allow users to configure an ordered fallback list for their own OpenAI-compatible service.
+Use the configured model priority. The repository default chain is `gpt-image-2.5-flare`, then `gpt-image-2.5-sunburst`, then `gpt-image-2`; treat model names as provider-defined and allow users to configure an ordered fallback list for their own OpenAI-compatible service.
 
 Let the runner retry the same model for transient failures and then move through any configured fallback list for upstream, availability, or model-specific failures. Do not fall back for authentication errors, content-policy rejection, malformed prompts, or unrelated invalid parameters. When the user explicitly names a model, place it first; set `strictModel: true` only when the user requires that exact model and does not want fallback.
+
+### Choose a model tier per job
+
+The two GPT Image 2.5 models share the same token rates; they differ in latency and rendering precision. `gpt-image-2.5-flare` is the speed tier, with image quality comparable to `gpt-image-2`. `gpt-image-2.5-sunburst` is the quality tier, with higher rendering precision and tighter control across edits.
+
+Decide the tier per job, not per batch. Workers are independent, so a mixed-tier batch is normal and expected.
+
+| Job | Normal tier |
+|---|---|
+| Bulk batch members, icons, sprites, tiles, UI elements, placeholders | Configured default chain |
+| Exploration passes and style probes before the art direction is fixed | Configured default chain |
+| Hero art, key visual, store or marketing imagery, a single showcase asset | `gpt-image-2.5-sunburst` |
+| Fine detail at large size, intricate texture, dense or complex layout | `gpt-image-2.5-sunburst` |
+| Identity-preserving edits and multi-reference composition where the reference must survive intact | `gpt-image-2.5-sunburst` |
+
+Set the tier through the job's `model` field and leave fallback enabled, so an endpoint that does not expose that model still resolves through the configured chain. Reserve `strictModel: true` for a user who requires one exact model.
+
+Do not escalate a whole batch to the quality tier by default. The cost of escalation is latency rather than price, and the bounded worker count is what limits a large asset set. Escalate the few assets that carry the result.
+
+### Choose and report dimensions
+
+Report the saved dimensions from the runner rather than the requested tier. Some services ignore `size` entirely and return their own fixed dimensions and orientation, so check `sizeMatched` before telling the user an asset matches a requested ratio or resolution, and steer composition through the prompt when it does not.
 
 Choose aspect ratio and resolution from the consuming context:
 
@@ -115,7 +137,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 4. Check subject, composition, dimensions, background intent, legibility, unwanted text, obvious artifacts, identity preservation, and consistency with neighboring assets.
 5. Compare `requestedCount` with `returnedCount`, surface count-shortfall warnings, and preserve every file from a `partial` job.
 6. Accept compliant images.
-7. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration.
+7. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration. When the failure is rendering quality rather than a prompt defect, such as soft detail, mangled small features, or an imprecise edit, escalate that one job to `gpt-image-2.5-sunburst` instead of only rewording the prompt.
 8. Never delete a rejected output automatically. Keep it available unless the user explicitly asks for cleanup.
 
 ## Create clickable preview links
