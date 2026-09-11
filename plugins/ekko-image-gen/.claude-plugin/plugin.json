@@ -1,6 +1,6 @@
 {
   "name": "ekko-image-gen",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Context-aware image generation with visual review, absolute paths, and temporary loopback HTTP preview links without automatic GUI launch.",
   "author": {
     "name": "ZaunEkko",

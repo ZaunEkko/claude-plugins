@@ -14,6 +14,7 @@
 - 当前消息粘贴或附加了图片：图生图；
 - 提供多个图片路径或 URL：多参考图编辑；
 - 多个独立素材：受控 worker 并行生成；
+- 需要更高细节或更精确编辑的素材：主代理把该 job 单独升到质量档模型，同批其余素材仍走速度档；
 - 一张图的多个方案：使用一个逻辑 job 的 `count: 1-4`，runner 可按服务商单次上限自动拆分；
 - 用户发起生成或编辑：主代理验收后默认返回绝对路径和临时 `http://127.0.0.1` 点击预览链接；
 - 用户 Ctrl/Cmd+点击链接：浏览器显示图片，插件本身不会主动弹出应用；
@@ -30,17 +31,19 @@
 }
 ```
 
-密钥文件位于用户目录，不进入插件仓库。普通用户只需填写 `baseUrl` 和 `apiKey`；模型默认使用 `gpt-image-2`，多图能力由真实响应自动适配。修改配置后下一次调用立即生效。
+密钥文件位于用户目录，不进入插件仓库。普通用户只需填写 `baseUrl` 和 `apiKey`；模型默认使用 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2` 这条回退链，多图能力由真实响应自动适配。修改配置后下一次调用立即生效。
 
-`maxImagesPerRequest` 是高级可选上限，默认 `4`，有效范围 `1-4`。不配置时，如果服务对 `n: 3` 只返回一张，runner 会从真实响应推断有效单次能力，并在原始逻辑 `count` 范围内安排有界 follow-up 请求。不同素材 job 仍可并发执行。
+`maxImagesPerRequest` 是高级可选上限，默认 `4`，有效范围 `1-4`。不配置时，如果服务对 `n: 3` 只返回一张，runner 会从真实响应推断有效单次能力，并在原始逻辑 `count` 范围内安排有界 follow-up 请求。如果服务直接以 `400` 拒绝 `n` 参数本身（常见于把 Images API 转译成 Responses API `image_generation` 工具的网关），runner 会改用单图重发并把本次运行的后续请求都限制为每次一张，仅记录警告而不让 job 失败。不同素材 job 仍可并发执行。
 
 `maxOutputBytes` 是高级可选的单张输出上限，默认 50 MiB。除了限制解码后的 base64 图片和流式图片 URL，runner 还会在解析前限制 Images API JSON：按本次请求数量和 base64 膨胀推导容量，并预留 64 KiB 元数据；超限返回 `response_too_large`，不会重试或切换模型。
 
 如果由 Agent 协助安装，应让 Agent 检查并创建只包含 `baseUrl` 与占位 `apiKey` 的配置模板，然后提示用户直接编辑 `%USERPROFILE%\.claude\ekko-image-gen.local.json`（Windows）或 `~/.claude/ekko-image-gen.local.json`。不要在对话中粘贴 API Key。使用第三方 endpoint 时，提示词和参考图会发送到该第三方服务。
 
-仓库默认模型为 `gpt-image-2`，普通用户无需填写 `models`。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。
+仓库默认模型链为 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2`，普通用户无需填写 `models`。两个 2.5 模型 token 单价相同：`flare` 是速度档，画质对齐 `gpt-image-2`；`sunburst` 是质量档，细节与编辑精度更高。批量素材默认走 `flare`，Agent 会按 job 单独把主视觉、高细节大图、以及需要严格保留参考图特征的编辑升到 `sunburst`，不会整批升档；视觉复核不过且属于画质问题时也会对该 job 升档重试。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。同一次运行中，第一个成功命中的模型会被记住，后续 job 直接从该模型开始，不会每个 job 都重复一次失败探测；显式指定了 `model` 的 job 保持自己的优先顺序，升档不受影响。
 
-支持 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` 及相应的 `1k / 2k / 4k` 服务预设，也可传精确 `WIDTHxHEIGHT`。服务可能接受 4K 请求但返回较小的实际像素，最终结果会同时报告请求尺寸和实际尺寸。
+支持 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` 及相应的 `1k / 2k / 4k` 服务预设，也可传精确 `WIDTHxHEIGHT`。服务可能接受 4K 请求但返回较小的实际像素，部分网关甚至完全忽略 `size`（连方向都由服务决定），最终结果会同时报告请求尺寸和实际尺寸。
+
+`quality` 可用 `auto / low / medium / high / xhigh / max`。`xhigh` 与 `max` 由 GPT Image 2.5 引入，早于 2.5 的服务会直接拒绝这两个值。
 
 ## 示例
 
@@ -130,6 +133,9 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 - `queue_timeout`：降低 worker 数量或检查是否存在长期占用的生成请求。
 - `response_too_large`：Images API 返回的 JSON 超过按单图上限和本次请求数量推导出的安全边界；检查服务异常响应，或在确认输出确有需要后提高 `maxOutputBytes`。
 - 请求多张但服务单次只返回一张：runner 会自动补齐；若后续请求失败，检查 `partial` 错误。已知服务只能单张时可选设 `maxImagesPerRequest: 1` 以省去首次探测。
+- `unknown_parameter` 且消息指向 `n`：服务不接受单次多图，常见于把 Images API 转译成 Responses API `image_generation` 工具的网关。runner 会自动改用单图重发并记录告警；若仍失败，显式设置 `maxImagesPerRequest: 1`。
+- `model_not_found` 或提示模型在当前分组不可用：确认该 API Key 所属分组已开通图像模型。runner 会沿配置链尝试下一个模型，全部失败才报错，错误详情中的 `modelAttempts` 会列出每个模型的实际状态。
+- `quality must be auto, low, medium, high, xhigh, or max`：传入了不支持的画质值；`xhigh` 与 `max` 需要服务端支持 GPT Image 2.5。
 - 点击预览链接无响应：确认终端允许 Ctrl/Cmd+点击普通 HTTP URL，并检查链接是否已超过 15 分钟；过期后可要求重新创建预览链接。
 - `preview_start_failed`：临时 loopback 服务未能启动；图片仍已成功生成，请使用绝对路径。
 - SSH / 容器 / 远程开发：`127.0.0.1` 可能指向 Claude Code 所在主机而不是浏览器所在主机；使用端口转发或绝对路径。

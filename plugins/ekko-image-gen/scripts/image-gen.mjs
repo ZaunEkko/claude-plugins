@@ -8,7 +8,11 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DEFAULT_MODELS = Object.freeze(["gpt-image-2"]);
+const DEFAULT_MODELS = Object.freeze([
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2",
+]);
 
 const SIZE_PRESETS = Object.freeze({
   "auto@auto": "1024x1024",
@@ -66,7 +70,11 @@ const MODEL_FALLBACK_MESSAGE_PATTERNS = Object.freeze([
   /\b(?:model|deployment)\b.{0,120}\b(?:not found|cannot be found|does not exist|not available|unavailable|not supported|unsupported|unknown)\b/iu,
   /\bno such\s+(?:model|deployment)\b/iu,
 ]);
-const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high"]);
+const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high", "xhigh", "max"]);
+const MULTI_IMAGE_REJECTION_STATUSES = new Set([400, 422]);
+const MULTI_IMAGE_REJECTION_PARAM_PATTERN = /(?:^|\.)n$/u;
+const MULTI_IMAGE_REJECTION_MESSAGE_PATTERN =
+  /\b(?:unknown|unsupported|unrecognized|invalid)\b[^\n]{0,80}\bparameter\b[^\n]{0,80}(?:['"`]|\.)n\b/iu;
 
 class ImageGenError extends Error {
   constructor(
@@ -249,7 +257,7 @@ function mergeEnvironment(fileConfig, env) {
 export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
   const quality = nonEmptyString(raw.quality) ?? DEFAULT_CONFIG.quality;
   if (!SUPPORTED_QUALITIES.has(quality)) {
-    throw new ImageGenError("quality must be auto, low, medium, or high", {
+    throw new ImageGenError("quality must be auto, low, medium, high, xhigh, or max", {
       code: "invalid_config",
     });
   }
@@ -395,7 +403,7 @@ function normalizeJob(raw, index, config, cwd) {
   const count = boundedInteger(raw.count ?? raw.n, 1, 1, 4, `jobs[${index}].count`);
   const quality = nonEmptyString(raw.quality) ?? config.quality;
   if (!SUPPORTED_QUALITIES.has(quality)) {
-    throw new ImageGenError(`jobs[${index}].quality must be auto, low, medium, or high`, {
+    throw new ImageGenError(`jobs[${index}].quality must be auto, low, medium, high, xhigh, or max`, {
       code: "invalid_request",
     });
   }
@@ -428,6 +436,7 @@ function normalizeJob(raw, index, config, cwd) {
       ?? (effectiveRequestedAspectRatio === "auto" ? "auto" : fallbackResolution),
   }, config.size, `jobs[${index}].size`);
 
+  const explicitModel = Array.isArray(raw.models) || nonEmptyString(raw.model) !== null;
   let models;
   if (Array.isArray(raw.models)) {
     models = normalizeModels(raw.models);
@@ -475,6 +484,7 @@ function normalizeJob(raw, index, config, cwd) {
     outputDir,
     outputName: sanitizeBaseName(outputName, id),
     models,
+    explicitModel,
     size: size.size,
     aspectRatio: size.aspectRatio,
     resolution: size.resolution,
@@ -825,6 +835,25 @@ function shouldFallbackModel(error) {
   return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
+function orderJobModels(job, runtime) {
+  const resolved = nonEmptyString(runtime.resolvedModel);
+  if (job.explicitModel || !resolved || !job.models.includes(resolved)) {
+    return job.models;
+  }
+  return [resolved, ...job.models.filter((model) => model !== resolved)];
+}
+
+function isMultiImageCountRejection(error, requestedCount) {
+  if (requestedCount <= 1 || !MULTI_IMAGE_REJECTION_STATUSES.has(error.status)) {
+    return false;
+  }
+  const param = nonEmptyString(error.details?.param);
+  if (param) {
+    return MULTI_IMAGE_REJECTION_PARAM_PATTERN.test(param);
+  }
+  return MULTI_IMAGE_REJECTION_MESSAGE_PATTERN.test(String(error.message ?? ""));
+}
+
 function jsonResponseLimit(config, count) {
   const encodedImageBytes = Math.ceil(config.maxOutputBytes / 3) * 4;
   return encodedImageBytes * count + JSON_RESPONSE_OVERHEAD_BYTES;
@@ -880,9 +909,11 @@ async function callApi(endpoint, buildRequest, config, fetchImpl, responseLimitB
         return body;
       }
       const message = redact(body?.error?.message ?? body?.detail ?? `HTTP ${response.status}`, config.apiKey);
+      const errorParam = nonEmptyString(body?.error?.param);
       lastError = new ImageGenError(message, {
-        code: body?.error?.code ?? "api_error",
+        code: body?.error?.code ?? body?.error?.type ?? "api_error",
         status: response.status,
+        details: errorParam ? { param: errorParam } : null,
       });
       if (!RETRYABLE_STATUSES.has(response.status) || attempt === config.maxRetries) {
         throw lastError;
@@ -1164,13 +1195,17 @@ function buildJobResult(
   return result;
 }
 
-async function runJob(job, config, fetchImpl, cwd) {
+async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
   const startedAt = Date.now();
   const inputs = await Promise.all(
     job.images.map((image) => loadImageBytes(image, config, fetchImpl, cwd)),
   );
   const mode = inputs.length > 0 ? "edit" : "generate";
-  const requestCounts = splitRequestCounts(job.count, config.maxImagesPerRequest);
+  const orderedModels = orderJobModels(job, runtime);
+  const requestCounts = splitRequestCounts(
+    job.count,
+    runtime.multiImageCap ?? config.maxImagesPerRequest,
+  );
   const modelAttempts = [];
   const files = [];
   const usageByRequest = [];
@@ -1178,23 +1213,56 @@ async function runJob(job, config, fetchImpl, cwd) {
   let selectedModel = null;
 
   for (let requestIndex = 0; requestIndex < requestCounts.length; requestIndex += 1) {
-    const requestedCount = requestCounts[requestIndex];
+    let requestedCount = requestCounts[requestIndex];
     let body = null;
+    const requestChunk = async (model) => {
+      try {
+        return await requestImageChunk(
+          job,
+          inputs,
+          mode,
+          model,
+          requestedCount,
+          config,
+          fetchImpl,
+        );
+      } catch (error) {
+        if (!isMultiImageCountRejection(error, requestedCount)) {
+          throw error;
+        }
+        const rejectedCount = requestedCount;
+        runtime.multiImageCap = 1;
+        const recoveryCounts = splitRequestCounts(job.count - files.length, 1);
+        requestCounts.splice(
+          requestIndex,
+          requestCounts.length - requestIndex,
+          ...recoveryCounts,
+        );
+        requestedCount = requestCounts[requestIndex];
+        countWarnings.push(
+          `The service rejected an upstream request for ${rejectedCount} images; retried with one image per upstream request`,
+        );
+        return requestImageChunk(
+          job,
+          inputs,
+          mode,
+          model,
+          requestedCount,
+          config,
+          fetchImpl,
+        );
+      }
+    };
 
     if (requestIndex === 0) {
-      for (let modelIndex = 0; modelIndex < job.models.length; modelIndex += 1) {
-        const model = job.models[modelIndex];
+      for (let modelIndex = 0; modelIndex < orderedModels.length; modelIndex += 1) {
+        const model = orderedModels[modelIndex];
         try {
-          body = await requestImageChunk(
-            job,
-            inputs,
-            mode,
-            model,
-            requestedCount,
-            config,
-            fetchImpl,
-          );
+          body = await requestChunk(model);
           selectedModel = model;
+          if (!job.explicitModel) {
+            runtime.resolvedModel = model;
+          }
           modelAttempts.push({ model, status: "ok", code: null, httpStatus: 200 });
           break;
         } catch (error) {
@@ -1204,7 +1272,7 @@ async function runJob(job, config, fetchImpl, cwd) {
             code: error.code ?? "image_gen_error",
             httpStatus: error.status ?? null,
           });
-          if (modelIndex === job.models.length - 1 || !shouldFallbackModel(error)) {
+          if (modelIndex === orderedModels.length - 1 || !shouldFallbackModel(error)) {
             throw new ImageGenError(error.message, {
               code: error.code,
               status: error.status,
@@ -1215,15 +1283,7 @@ async function runJob(job, config, fetchImpl, cwd) {
       }
     } else {
       try {
-        body = await requestImageChunk(
-          job,
-          inputs,
-          mode,
-          selectedModel,
-          requestedCount,
-          config,
-          fetchImpl,
-        );
+        body = await requestChunk(selectedModel);
       } catch (error) {
         return buildJobResult(job, {
           status: "partial",
@@ -1408,9 +1468,10 @@ export async function runJobs(payload, options = {}) {
 
   const request = normalizeRequest(payload, config, { cwd });
   const startedAt = Date.now();
+  const runtime = { multiImageCap: null, resolvedModel: null };
   const jobs = await mapLimit(request.jobs, request.concurrency, async (job) => {
     try {
-      return await runJob(job, config, fetchImpl, cwd);
+      return await runJob(job, config, fetchImpl, cwd, runtime);
     } catch (error) {
       return errorResult(job, error, config.apiKey);
     }

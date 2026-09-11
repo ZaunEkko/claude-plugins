@@ -11,6 +11,7 @@
 - 主代理根据当前项目、已有目录和任务上下文决定输出位置
 - 一个提示词可通过逻辑 `count: 1-4` 生成多个变体；runner 会根据高级 provider cap 或实际短返回自动拆分请求
 - 多个独立素材可由受控的叶子 `image-worker` 并行生成
+- 主代理按 job 分配模型档位：批量素材走速度档，主视觉、大尺寸高细节图和需保留参考图特征的编辑升到质量档；同一批次可以混档
 - 主代理读取实际图片、检查质量并定向重试
 - 输出图片预览、绝对路径、临时 `http://127.0.0.1` 点击预览链接、兼容性 `file:///` 元数据和服务 URL
 - 本地 `file://` 链接是否可用取决于 Claude Code 渲染器和终端宿主；默认交互改用普通 HTTP 链接，用户 Ctrl/Cmd+点击后由浏览器显示图片
@@ -49,15 +50,18 @@ plugins/ekko-image-gen/
 
 - `POST /v1/images/generations`
 - `POST /v1/images/edits`
-- `gpt-image-2`：文生图与 multipart 图生图成功
+- `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2`：文生图成功；`gpt-image-2.5-flare` 与 `gpt-image-2.5-sunburst` 另验证了 multipart 图生图
+- `quality` 支持 `auto / low / medium / high / xhigh / max`；`xhigh` 与 `max` 是 GPT Image 2.5 新增档位，早于 2.5 的服务会在上游拒绝
 - 可配置的模型 fallback；较早的兼容服务也验证过 `plus-codex-gpt-image-2` 与 `codex-gpt-image-2`
-- 逻辑 `n` / `count` 范围 `1-4`；可按高级 provider cap 或真实短返回自动拆成串行上游请求
+- 逻辑 `n` / `count` 范围 `1-4`；可按高级 provider cap、真实短返回，或上游对 `n` 参数的直接拒绝，自动拆成串行单图请求
 - 多参考图使用 OpenAI 文档约定的重复 `image[]` multipart 字段；单参考图保留已验证的 `image` 兼容路径
 - GPT Image 默认返回 `b64_json`；runner 也可处理服务返回的 HTTP(S) 图片 URL，标准请求不发送旧式 `response_format`
 
-仓库默认模型为 `gpt-image-2`，普通用户无需填写 `models`。模型名称由服务商定义；只有目标 endpoint 不暴露默认模型或需要多级 fallback 时，才使用高级 `models` 配置。runner 只对上游、限流、可用性或模型相关错误执行模型回退；认证、内容或普通参数错误不会被掩盖。
+仓库默认模型链为 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2`，普通用户无需填写 `models`：只暴露其中一个名称的 endpoint 会经由模型回退自动命中。模型名称由服务商定义；只有目标 endpoint 不暴露默认模型或需要多级 fallback 时，才使用高级 `models` 配置。runner 只对上游、限流、可用性或模型相关错误执行模型回退；认证、内容或普通参数错误不会被掩盖。
 
-支持从服务前端提取的 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` 比例和 `1k / 2k / 4k` 组合，也支持显式 `WIDTHxHEIGHT`。4K 是请求层级；实测上游可能返回相同比例但较小的实际像素，因此 runner 会报告真实宽高与 `sizeMatched`，不会虚报精确 4K。
+两个 GPT Image 2.5 模型 token 单价相同，差别在延迟与渲染精度：`gpt-image-2.5-flare` 是速度档，画质对齐 `gpt-image-2`；`gpt-image-2.5-sunburst` 是质量档，细节还原与编辑控制更强。档位由主代理按 job 决定，通过 job 的 `model` 字段生效并保留后续 fallback，因此 endpoint 不提供该模型时仍会沿配置链回退。升档的代价是延迟而不是价格，所以默认只升少数决定成品观感的素材，不整批升档。
+
+支持从服务前端提取的 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` 比例和 `1k / 2k / 4k` 组合，也支持显式 `WIDTHxHEIGHT`。4K 是请求层级；实测上游可能返回相同比例但较小的实际像素，部分网关则完全忽略 `size`，无论传哪个预设都返回固定尺寸与固定方向。因此 runner 会报告真实宽高与 `sizeMatched`，不会虚报精确 4K；在这类服务上只能通过提示词引导构图。
 
 ## 用户级配置
 

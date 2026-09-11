@@ -47,6 +47,7 @@ If the prompt or output directory is missing, return a blocking error instead of
 7. Compare `requestedCount` with `returnedCount`. Report every count-shortfall warning, and preserve all paths from a `partial` job when a later split request fails.
 8. Treat a `sizeMatched: false` result as a concrete warning for the parent agent; do not claim that a requested 4K tier produced exact 4K pixels.
 9. Do not silently regenerate for aesthetic preference. Return evidence to the parent agent, which owns final acceptance and retry decisions.
+10. Use the model tier the parent assigned. Do not substitute a faster or higher-quality model on your own judgment. Report the model that actually produced the files, which may differ from the first requested model when the runner fell back.
 
 ## Safety and concurrency
 
@@ -68,6 +69,7 @@ Return a compact structured report:
 - Job: `<job-id>`
 - Status: `ok | partial | error`
 - Mode: `generate | edit`
+- Model: `<model that produced the files>` `<note fallback when it differs from the requested model>`
 - Duration: `<milliseconds>`
 - Requested/returned: `<requestedCount>/<returnedCount>` across `<requestCount>` successful upstream responses
 - Files:
@@ -76,7 +78,7 @@ Return a compact structured report:
   - `<service URL or none>`
 - Warnings: `<count, size, or partial-result warnings; none if empty>`
 - Basic check: `<pass or concrete issue>`
-- Retry recommendation: `<none or one specific correction>`
+- Retry recommendation: `<none, one specific correction, or a quality-tier escalation when detail or edit precision fell short>`
 ```
 
 Preserve successful file information when another result in the same batch fails.
