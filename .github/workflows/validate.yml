@@ -56,7 +56,7 @@ jobs:
         run: bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
 
       - name: Run complete Node test suite
-        run: node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs
+        run: node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs plugins/ekko-collab-protocol/tests/*.mjs
 
       - name: Validate marketplace and active plugins
         shell: bash

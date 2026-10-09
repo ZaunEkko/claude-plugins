@@ -38,6 +38,7 @@ ZaunEkko が管理する Claude Code プラグインマーケットプレイス�
 |---|---|---|---|
 | `commit-commands` | 利用可能・互換配布 | 公式の 3 コマンド名を維持し、現在のセッションモデルと任意の effort を Git commit attribution に書き込み、Claude Code 内の直接 commit による wrapper の迂回を防ぎます。 | [利用ガイド](docs/commit-commands/README.md) · [実装とアップストリーム情報](../../plugins/commit-commands/README.md) |
 | `ekko-image-gen` | 利用可能・オリジナル | localhost または外部 HTTPS の OpenAI-compatible Images API を 1 つのコマンドで呼び出し、文生図、貼り付けた参照画像の編集、プロジェクト文脈に沿った保存、制限付きリーフ worker、画像レビュー、クリック可能なローカル出力を提供します。 | [利用ガイド](../../docs/ekko-image-gen/README.md) · [実装](../../plugins/ekko-image-gen/README.md) |
+| `ekko-collab-protocol` | 利用可能・オリジナル | ソフトウェアプロジェクトの Coding Agent 協調プロトコル（入口、現在の状態、要件記録、ADR）をワンコマンドで初期化し、同梱のオフライン ekko-benchmark で静的スコアと Agent 意味スコアを示し、客観的な誤りとコアの欠落を優先して承認後に改善します。 | [利用ガイド](../../docs/ekko-collab-protocol/README.md) · [実装](../../plugins/ekko-collab-protocol/README.md) |
 
 `commit-commands` は公式配布と同じ名前空間を使用します。同一 scope では一方だけを有効にしてください。
 
@@ -49,6 +50,7 @@ ZaunEkko が管理する Claude Code プラグインマーケットプレイス�
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
 /plugin install ekko-image-gen@zaunekko
+/plugin install ekko-collab-protocol@zaunekko
 /reload-plugins
 ```
 
@@ -70,6 +72,7 @@ claude plugin marketplace add ZaunEkko/claude-plugins
 claude plugin marketplace update zaunekko
 claude plugin install commit-commands@zaunekko --scope user
 claude plugin install ekko-image-gen@zaunekko --scope user
+claude plugin install ekko-collab-protocol@zaunekko --scope user
 ```
 
 同じ scope で公式版が有効な場合：
@@ -91,6 +94,7 @@ claude plugin enable commit-commands@zaunekko --scope user
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
 claude plugin update ekko-image-gen@zaunekko --scope user
+claude plugin update ekko-collab-protocol@zaunekko --scope user
 ```
 
 ### `ekko-image-gen` の設定
@@ -122,6 +126,9 @@ endpoint は localhost または外部 HTTPS サービスを使用できます�
 | `/commit-commands:commit-push-pr` | commit、push、Pull Request 作成を順番に実行します。 |
 | `/commit-commands:clean_gone` | 決定的なクリーンアップ計画を作成して明示的な確認を求めた後、正確な `refs/remotes/...` upstream が存在しない安全なブランチと条件を満たす clean な worktree だけを削除します。 |
 | `/ekko-image-gen:generate` | 設定済みの OpenAI-compatible Images API で画像を生成・編集し、プロジェクト文脈に沿ってローカル出力を保存、確認、報告します。 |
+| `/ekko-collab-protocol:init` | プロジェクト構成を調べ、チームの決定だけを質問し、確認後に入口・状態ファイル・要件記録・ADR の規約を作成します。既存ファイルは上書きしません。 |
+| `/ekko-collab-protocol:score` | 読み取り専用で決定的な静的スコアと Agent 意味スコアを、規則ごとの根拠と改善案付きで示します。 |
+| `/ekko-collab-protocol:optimize` | まず採点し、客観的な誤り・コアの欠落・その他の欠落の順に並べ、選んだ項目だけを修正して前後のスコアを報告します。 |
 
 Attribution の例：
 
@@ -173,7 +180,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 python -m pip install PyYAML==6.0.3
 python .github/validate-repository.py
 bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
-node --test plugins/commit-commands/tests/*.mjs
+node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs plugins/ekko-collab-protocol/tests/*.mjs
 claude plugin validate .
 claude plugin validate . --strict
 claude plugin validate plugins/commit-commands

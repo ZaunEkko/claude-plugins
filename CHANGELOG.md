@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added the `ekko-collab-protocol` plugin with three skills for a software project's Coding Agent collaboration protocol:
+  - `/ekko-collab-protocol:init` inspects the project, asks only for team decisions, and creates the entry point, status file, requirement-record convention and ADR index through a deterministic plan that is applied only after the exact digest is confirmed and never overwrites existing files;
+  - `/ekko-collab-protocol:score` reports the deterministic static score and a read-only agent semantic score with per-rule evidence;
+  - `/ekko-collab-protocol:optimize` ranks objective defects, core gaps and other gaps by expected gain, treats scanner false negatives as benchmark feedback instead of rewriting docs, applies only user-selected items, and reports scores before and after.
+- Bundled the offline, dependency-free `@zaunekko/benchmark` 0.1.0 build with a hash-recorded `VENDOR.json` and a sync script.
+- Added isolated tests proving that Chinese and English, single-repository, multi-repository and docs-first initialization output passes every applicable benchmark rule, plus digest, no-overwrite, path and symbolic-link safety checks.
+
 ## 2.2.0 - 2026-09-11
 
 ### Added
