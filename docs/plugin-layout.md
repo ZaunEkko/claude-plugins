@@ -49,6 +49,7 @@ plugins/<plugin-name>/.claude-plugin/plugin.json
 
 - `plugins/commit-commands/.claude-plugin/plugin.json`
 - `plugins/ekko-image-gen/.claude-plugin/plugin.json`
+- `plugins/ekko-collab-protocol/.claude-plugin/plugin.json`
 
 `plugins/ekko-plugin-scaffold/.claude-plugin/plugin.json` 仅作为未上架的历史布局示例保留，不属于活动目录，也不是受支持的安装目标。
 
@@ -103,6 +104,27 @@ plugins/ekko-image-gen/
 ```
 
 该插件只暴露一个用户技能命令。主代理负责上下文感知规划和最终图片验收；没有 `Agent` 工具的叶子 worker 负责受控并发生成；Node.js runner 负责认证、API 路由、multipart 上传、并发槽与文件落盘。
+
+## `ekko-collab-protocol` 结构
+
+```text
+plugins/ekko-collab-protocol/
+├── .claude-plugin/plugin.json
+├── skills/
+│   ├── init/SKILL.md
+│   ├── score/SKILL.md
+│   └── optimize/SKILL.md
+├── scripts/
+│   ├── benchmark.mjs
+│   ├── init-protocol.mjs
+│   ├── lib/protocol-templates.mjs
+│   ├── sync-benchmark.mjs
+│   └── vendor/ekko-benchmark/
+├── tests/collab-protocol.test.mjs
+└── README.md
+```
+
+该插件暴露 `init`、`score`、`optimize` 三个技能命令，共用随插件分发的离线 ekko-benchmark 评分引擎（`VENDOR.json` 记录版本与文件哈希）。初始化由确定性脚本按“计划 → 摘要确认 → 只创建不覆盖”执行；打分只读；优化只应用用户选中的条目。
 
 ## 文档分层
 

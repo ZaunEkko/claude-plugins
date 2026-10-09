@@ -27,6 +27,17 @@
       },
       "category": "Productivity",
       "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/ekko-image-gen"
+    },
+    {
+      "name": "ekko-collab-protocol",
+      "source": "./plugins/ekko-collab-protocol",
+      "description": "Initialize, score and improve a software project's Coding Agent collaboration protocol with the bundled offline ekko-benchmark: digest-confirmed initialization that never overwrites files, read-only static plus agent semantic scoring, and ranked improvements applied only after approval.",
+      "author": {
+        "name": "ZaunEkko",
+        "url": "https://github.com/ZaunEkko"
+      },
+      "category": "Development",
+      "homepage": "https://github.com/ZaunEkko/claude-plugins/tree/main/plugins/ekko-collab-protocol"
     }
   ]
 }

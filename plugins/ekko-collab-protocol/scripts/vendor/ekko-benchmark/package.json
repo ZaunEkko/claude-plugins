@@ -1,0 +1,5 @@
+{
+  "name": "ekko-benchmark-vendored",
+  "private": true,
+  "type": "module"
+}

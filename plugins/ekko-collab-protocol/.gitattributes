@@ -1,0 +1,4 @@
+*.js text eol=lf
+*.mjs text eol=lf
+# VENDOR.json hashes the vendored files byte for byte; keep every checkout identical.
+scripts/vendor/** text eol=lf
