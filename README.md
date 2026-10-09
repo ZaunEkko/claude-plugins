@@ -42,6 +42,7 @@
 |---|---|---|---|
 | `commit-commands` | 可用 · 兼容分发 | 基于 Anthropic 官方同名插件，保留三个命令，提供当前会话模型 attribution、Bash 与已知 Playwright unsafe 提交防绕过保护、显式 detached session 绑定，以及确认式安全分支/worktree 清理。 | [使用指南](docs/commit-commands/README.md) · [实现与上游说明](plugins/commit-commands/README.md) |
 | `ekko-image-gen` | 可用 · 原创 | 使用一个命令调用用户配置的 OpenAI-compatible Images API（localhost 或第三方 HTTPS），支持文生图、粘贴图片后的图生图、项目上下文感知落盘、受控并发叶子 worker、主代理视觉验收、绝对路径，以及可 Ctrl/Cmd+点击且不会自动弹窗的临时本地 HTTP 预览链接。 | [使用指南](docs/ekko-image-gen/README.md) · [实现说明](plugins/ekko-image-gen/README.md) |
+| `ekko-collab-protocol` | 可用 · 原创 | 一键为软件项目初始化 Coding Agent 协作协议（入口、当前状态、需求记录、ADR），用内置离线 ekko-benchmark 给出静态分与 Agent 语义分，并按客观错误、核心缺口排序，经你确认后自动优化。 | [使用指南](docs/ekko-collab-protocol/README.md) · [实现说明](plugins/ekko-collab-protocol/README.md) |
 
 `commit-commands` 与官方分发暴露相同命名空间。请在同一作用域内只启用一个版本。
 
@@ -55,6 +56,7 @@
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
 /plugin install ekko-image-gen@zaunekko
+/plugin install ekko-collab-protocol@zaunekko
 /reload-plugins
 ```
 
@@ -92,6 +94,7 @@ claude plugin marketplace update zaunekko
 ```bash
 claude plugin install commit-commands@zaunekko --scope user
 claude plugin install ekko-image-gen@zaunekko --scope user
+claude plugin install ekko-collab-protocol@zaunekko --scope user
 ```
 
 如果同一作用域已经启用官方版本，请先禁用官方分发，再启用本版本：
@@ -113,6 +116,7 @@ claude plugin enable commit-commands@zaunekko --scope user
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
 claude plugin update ekko-image-gen@zaunekko --scope user
+claude plugin update ekko-collab-protocol@zaunekko --scope user
 ```
 
 #### 3. 配置 `ekko-image-gen`
@@ -153,6 +157,9 @@ claude plugin update ekko-image-gen@zaunekko --scope user
 | `/commit-commands:commit-push-pr` | 按顺序 commit、push 并创建 Pull Request。 |
 | `/commit-commands:clean_gone` | 先显示确定性计划并请求确认，再安全清理上游已消失、提交仍被保留的分支及干净 worktree。 |
 | `/ekko-image-gen:generate` | 调用用户配置的 OpenAI-compatible Images API 完成文生图或图生图，并按当前项目上下文保存、展示和验收图片。 |
+| `/ekko-collab-protocol:init` | 识别项目结构，只就团队约定提问，经确认后生成协作入口、状态文件、需求记录与 ADR 约定；从不覆盖已有文件。 |
+| `/ekko-collab-protocol:score` | 只读地给出确定性静态分与 Agent 语义分，附逐条证据和改进建议。 |
+| `/ekko-collab-protocol:optimize` | 先打分，再按客观错误、核心缺口、一般缺口排序，只修改你选中的条目，并报告改前改后分数。 |
 
 生成的 attribution 形如：
 
@@ -177,6 +184,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [`commit-commands` 实现、测试与上游同步](plugins/commit-commands/README.md)
 - [`ekko-image-gen` 使用指南](docs/ekko-image-gen/README.md)
 - [`ekko-image-gen` 实现、配置与测试](plugins/ekko-image-gen/README.md)
+- [`ekko-collab-protocol` 使用指南](docs/ekko-collab-protocol/README.md)
+- [`ekko-collab-protocol` 实现、打包引擎与测试](plugins/ekko-collab-protocol/README.md)
 - [贡献指南](CONTRIBUTING.md)
 - [支持渠道](SUPPORT.md)
 
@@ -194,7 +203,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ├── i18n/
 ├── plugins/
 │   ├── commit-commands/
-│   └── ekko-image-gen/
+│   ├── ekko-image-gen/
+│   └── ekko-collab-protocol/
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 └── README.md
@@ -217,13 +227,15 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 python -m pip install PyYAML==6.0.3
 python .github/validate-repository.py
 bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
-node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs
+node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs plugins/ekko-collab-protocol/tests/*.mjs
 claude plugin validate .
 claude plugin validate . --strict
 claude plugin validate plugins/commit-commands
 claude plugin validate plugins/commit-commands --strict
 claude plugin validate plugins/ekko-image-gen
 claude plugin validate plugins/ekko-image-gen --strict
+claude plugin validate plugins/ekko-collab-protocol
+claude plugin validate plugins/ekko-collab-protocol --strict
 ```
 
 `--strict` 会把验证警告视为错误，适合在 Pull Request 与发布前使用。

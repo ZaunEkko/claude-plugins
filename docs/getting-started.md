@@ -32,6 +32,7 @@ claude plugin marketplace update zaunekko
 ```bash
 claude plugin install commit-commands@zaunekko --scope user
 claude plugin install ekko-image-gen@zaunekko --scope user
+claude plugin install ekko-collab-protocol@zaunekko --scope user
 ```
 
 作用域：
@@ -48,6 +49,7 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 claude plugin marketplace add --scope local "D:/path/to/claude-plugins"
 claude plugin install commit-commands@zaunekko --scope local
 claude plugin install ekko-image-gen@zaunekko --scope local
+claude plugin install ekko-collab-protocol@zaunekko --scope local
 ```
 
 ## 配置 `ekko-image-gen`
@@ -82,6 +84,7 @@ claude plugin enable commit-commands@zaunekko --scope user
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
 claude plugin update ekko-image-gen@zaunekko --scope user
+claude plugin update ekko-collab-protocol@zaunekko --scope user
 ```
 
 查看当前状态：
@@ -122,5 +125,6 @@ claude plugin marketplace remove zaunekko --scope user
 
 - [`commit-commands` 使用指南](commit-commands/README.md)
 - [`ekko-image-gen` 使用指南](ekko-image-gen/README.md)
+- [`ekko-collab-protocol` 使用指南](ekko-collab-protocol/README.md)
 - [故障排查](troubleshooting.md)
 - [Trust & Safety](../README.md#️-trust--safety)

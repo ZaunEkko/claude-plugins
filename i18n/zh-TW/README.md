@@ -38,6 +38,7 @@
 |---|---|---|---|
 | `commit-commands` | 可用 · 相容分發 | 保留三個官方命令名稱，將目前工作階段模型與可用 effort 寫入 Git commit attribution，並阻止 Claude Code 直接 commit 繞過 wrapper。 | [使用指南](docs/commit-commands/README.md) · [實作與上游說明](../../plugins/commit-commands/README.md) |
 | `ekko-image-gen` | 可用 · 原創 | 以單一命令呼叫使用者設定的 OpenAI-compatible Images API（localhost 或第三方 HTTPS），支援文生圖、貼上參考圖後的圖生圖、專案感知輸出、受控葉子 worker、視覺驗收與可點擊本機檔案。 | [使用指南](../../docs/ekko-image-gen/README.md) · [實作說明](../../plugins/ekko-image-gen/README.md) |
+| `ekko-collab-protocol` | 可用 · 原創 | 一鍵為軟體專案初始化 Coding Agent 協作協議（入口、目前狀態、需求記錄、ADR），以內建離線 ekko-benchmark 給出靜態分與 Agent 語意分，並依客觀錯誤、核心缺口排序，經你確認後自動優化。 | [使用指南](../../docs/ekko-collab-protocol/README.md) · [實作說明](../../plugins/ekko-collab-protocol/README.md) |
 
 `commit-commands` 與官方分發使用相同命名空間；同一 scope 只能啟用其中一個。
 
@@ -49,6 +50,7 @@
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
 /plugin install ekko-image-gen@zaunekko
+/plugin install ekko-collab-protocol@zaunekko
 /reload-plugins
 ```
 
@@ -70,6 +72,7 @@ claude plugin marketplace add ZaunEkko/claude-plugins
 claude plugin marketplace update zaunekko
 claude plugin install commit-commands@zaunekko --scope user
 claude plugin install ekko-image-gen@zaunekko --scope user
+claude plugin install ekko-collab-protocol@zaunekko --scope user
 ```
 
 若同一 scope 已啟用官方版本：
@@ -91,6 +94,7 @@ claude plugin enable commit-commands@zaunekko --scope user
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
 claude plugin update ekko-image-gen@zaunekko --scope user
+claude plugin update ekko-collab-protocol@zaunekko --scope user
 ```
 
 ### 設定 `ekko-image-gen`
@@ -122,6 +126,9 @@ endpoint 可以是 localhost 或第三方 HTTPS 服務。請勿提交真實密�
 | `/commit-commands:commit-push-pr` | 依序 commit、push 並建立 Pull Request。 |
 | `/commit-commands:clean_gone` | 先產生確定性清理計畫並要求明確確認，再只移除精確 `refs/remotes/...` 上游已不存在的安全分支與符合條件的乾淨 worktree。 |
 | `/ekko-image-gen:generate` | 透過設定的 OpenAI-compatible Images API 生成或編輯圖片，並依專案脈絡儲存、檢查與回報本機輸出。 |
+| `/ekko-collab-protocol:init` | 辨識專案結構，只就團隊約定提問，確認後產生協作入口、狀態檔、需求記錄與 ADR 約定；從不覆寫既有檔案。 |
+| `/ekko-collab-protocol:score` | 唯讀地給出確定性靜態分與 Agent 語意分，附逐條證據與改進建議。 |
+| `/ekko-collab-protocol:optimize` | 先評分，再依客觀錯誤、核心缺口、一般缺口排序，只修改你選取的項目，並回報改前改後分數。 |
 
 Attribution 範例：
 
@@ -173,7 +180,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 python -m pip install PyYAML==6.0.3
 python .github/validate-repository.py
 bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
-node --test plugins/commit-commands/tests/*.mjs
+node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs plugins/ekko-collab-protocol/tests/*.mjs
 claude plugin validate .
 claude plugin validate . --strict
 claude plugin validate plugins/commit-commands

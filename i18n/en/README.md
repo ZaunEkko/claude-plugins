@@ -38,6 +38,7 @@ Original plugins normally use the purpose-first name `ekko-<specific-purpose>`. 
 |---|---|---|---|
 | `commit-commands` | Available · compatibility distribution | Preserves the three official command names, writes the current session model plus optional effort into Git commit attribution, and blocks direct commits from bypassing the wrapper inside Claude Code. | [User guide](docs/commit-commands/README.md) · [Implementation and upstream notes](../../plugins/commit-commands/README.md) |
 | `ekko-image-gen` | Available · original | One command for an OpenAI-compatible Images API on localhost or a third-party HTTPS endpoint, with text-to-image, pasted-reference editing, context-aware output, bounded leaf workers, visual review, absolute paths, and temporary loopback HTTP preview links that never auto-launch a GUI. | [User guide](../../docs/ekko-image-gen/README.md) · [Implementation](../../plugins/ekko-image-gen/README.md) |
+| `ekko-collab-protocol` | Available · original | One-command initialization of a software project's Coding Agent collaboration protocol (entry point, status, requirement records, ADRs), static plus agent semantic scoring with the bundled offline ekko-benchmark, and ranked improvements applied only after your approval. | [User guide](../../docs/ekko-collab-protocol/README.md) · [Implementation](../../plugins/ekko-collab-protocol/README.md) |
 
 `commit-commands` exposes the same namespace as the official distribution. Enable exactly one version in any given scope.
 
@@ -51,6 +52,7 @@ Run these commands in the current session:
 /plugin marketplace add ZaunEkko/claude-plugins
 /plugin install commit-commands@zaunekko
 /plugin install ekko-image-gen@zaunekko
+/plugin install ekko-collab-protocol@zaunekko
 /reload-plugins
 ```
 
@@ -88,6 +90,7 @@ claude plugin marketplace update zaunekko
 ```bash
 claude plugin install commit-commands@zaunekko --scope user
 claude plugin install ekko-image-gen@zaunekko --scope user
+claude plugin install ekko-collab-protocol@zaunekko --scope user
 ```
 
 If the official distribution is enabled in the same scope, switch explicitly:
@@ -109,6 +112,7 @@ Refreshing a marketplace and updating an installed plugin are separate operation
 claude plugin marketplace update zaunekko
 claude plugin update commit-commands@zaunekko --scope user
 claude plugin update ekko-image-gen@zaunekko --scope user
+claude plugin update ekko-collab-protocol@zaunekko --scope user
 ```
 
 #### 3. Configure `ekko-image-gen`
@@ -142,6 +146,9 @@ Use `--scope local` for local development and same-name compatibility testing so
 | `/commit-commands:commit-push-pr` | Commit, then push, then create a Pull Request in fail-closed order. |
 | `/commit-commands:clean_gone` | Plan deterministic cleanup, request explicit confirmation, then remove only safe branches with an exact missing `refs/remotes/...` upstream and eligible clean worktrees. |
 | `/ekko-image-gen:generate` | Generate or edit images through the configured OpenAI-compatible Images API, then place, inspect, and report local output files in project context. |
+| `/ekko-collab-protocol:init` | Inspect the project, ask only about team decisions, and after confirmation create the entry point, status file, requirement-record convention and ADR index; never overwrites existing files. |
+| `/ekko-collab-protocol:score` | Read-only deterministic static score plus agent semantic score with per-rule evidence and suggestions. |
+| `/ekko-collab-protocol:optimize` | Score first, rank objective defects, core gaps and other gaps, apply only the items you select, and report scores before and after. |
 
 Generated attribution looks like:
 
@@ -198,7 +205,7 @@ See [CHANGELOG.md](../../CHANGELOG.md) and repository tags for actual released w
 python -m pip install PyYAML==6.0.3
 python .github/validate-repository.py
 bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
-node --test plugins/commit-commands/tests/*.mjs
+node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs plugins/ekko-collab-protocol/tests/*.mjs
 claude plugin validate .
 claude plugin validate . --strict
 claude plugin validate plugins/commit-commands

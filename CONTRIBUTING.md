@@ -99,7 +99,7 @@ claude plugin validate .
 python -m json.tool plugins/commit-commands/.claude-plugin/plugin.json >/dev/null
 python -m json.tool plugins/commit-commands/hooks/hooks.json >/dev/null
 bash -n plugins/commit-commands/scripts/commit-with-dynamic-attribution.sh
-node --test plugins/commit-commands/tests/*.mjs
+node --test plugins/commit-commands/tests/*.mjs plugins/ekko-image-gen/tests/*.mjs plugins/ekko-collab-protocol/tests/*.mjs
 claude plugin validate plugins/commit-commands --strict
 ```
 
