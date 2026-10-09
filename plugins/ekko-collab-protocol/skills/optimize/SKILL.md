@@ -3,7 +3,7 @@ name: optimize
 description: This skill should be used when the user asks to "优化协作文件", "自动优化 AI 协作", "按打分结果改进", "提升 benchmark 分数", "improve the agent collaboration protocol", "fix the collaboration gaps", or invokes `/ekko-collab-protocol:optimize`. It scores the project read-only first, ranks improvements (objective defects, core gaps, other gaps), applies only the items the user approves in the project's own files and style, and reports scores before and after.
 argument-hint: "[项目目录；默认当前目录]"
 allowed-tools: Read, Glob, Grep, Edit, Write, AskUserQuestion, Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/benchmark.mjs:*)
-version: 0.1.0
+version: 0.1.1
 ---
 
 # Improve a software project's Coding Agent collaboration protocol

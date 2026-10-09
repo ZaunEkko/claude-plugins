@@ -9,7 +9,7 @@
     "lib/core/inventory.js": "sha256:b5302d7080e780262b4d500c62ff959ad2c5204af0815d1dd2634e7550040746",
     "lib/errors.js": "sha256:56fbf967ce8afc7e63d6fdde7f92a10c5fbc9167724f2246aa4e7ada45ea3544",
     "lib/meta.js": "sha256:9f4d347a44ff3b869e1d9ae8a2a986b3f4f6e34eec6e2e5d94f7e46162a7bbbc",
-    "lib/report/render.js": "sha256:e2ce272a6f8215b150f24a8734cd4e3ed385c949c17ffa0fdcd1b821e59e7f6a",
+    "lib/report/render.js": "sha256:9dcb2a9154d3f2ae4306ab15a1be1c7380b28893b76f72fe15b3d665ac5393da",
     "lib/static/config.js": "sha256:e3fd5f872b02280730464d368860eb6058e03f8b1191e5f3a0856ae961aab0d6",
     "lib/static/profiles.js": "sha256:36a21bb60c6eeda9e900ebf57f646e8b4e68eb7f238d207000a18895255cf61d",
     "lib/static/rules.js": "sha256:80c4efba09a565e4b69ed794b65e90caf051f3746df42798faac6568a2e4ca91",
