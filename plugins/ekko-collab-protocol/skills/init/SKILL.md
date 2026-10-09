@@ -3,7 +3,7 @@ name: init
 description: This skill should be used when the user asks to "初始化协作文件", "初始化 AI 协作", "一键初始化协同", "生成 AGENTS.md", "给项目建立 Agent 协作规范", "set up AGENTS.md", "initialize the agent collaboration protocol", or invokes `/ekko-collab-protocol:init`. It inspects a software project, asks the user only for team decisions, and creates the Coding Agent collaboration protocol (entry point, status file, requirement records, ADR index) through a deterministic, digest-confirmed plan that never overwrites existing files.
 argument-hint: "[项目目录；默认当前目录]"
 allowed-tools: Read, Glob, Grep, Write, Edit, AskUserQuestion, Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/benchmark.mjs:*), Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/init-protocol.mjs:*)
-version: 0.1.0
+version: 0.1.1
 ---
 
 # Initialize a software project's Coding Agent collaboration protocol
