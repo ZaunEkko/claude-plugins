@@ -1,6 +1,6 @@
 {
   "name": "ekko-collab-protocol",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Initialize, score and improve a software project's Coding Agent collaboration protocol with the bundled offline ekko-benchmark: deterministic confirmation-gated initialization, read-only static plus agent semantic scoring, and ranked, approval-gated improvements.",
   "author": {
     "name": "ZaunEkko",

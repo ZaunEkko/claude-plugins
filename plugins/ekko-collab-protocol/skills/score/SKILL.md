@@ -3,7 +3,7 @@ name: score
 description: This skill should be used when the user asks to "给项目打分", "评估 AI 协作", "协作体检", "跑一下 ekko-benchmark", "agent 模式打分", "score the agent collaboration", "how agent-ready is this repo", or invokes `/ekko-collab-protocol:score`. It runs the bundled offline ekko-benchmark static scan, then performs the agent-mode semantic re-scoring read-only and reports both scores with evidence, without changing any file.
 argument-hint: "[项目目录；默认当前目录]"
 allowed-tools: Read, Glob, Grep, Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/benchmark.mjs:*)
-version: 0.1.0
+version: 0.1.1
 ---
 
 # Score a software project's Coding Agent collaboration protocol

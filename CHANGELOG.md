@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.3.1 - 2026-10-09
+
+### Changed
+
+- Bumped `ekko-collab-protocol` to `0.1.1` and re-synced its bundled engine with the published `@zaunekko/benchmark@0.1.0` from npm, whose agent protocol wording no longer names private calibration samples. Scoring rules, templates and skill behavior are unchanged.
+
 ## 2.3.0 - 2026-10-09
 
 ### Added
