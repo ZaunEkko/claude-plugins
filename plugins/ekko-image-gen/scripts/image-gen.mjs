@@ -928,11 +928,13 @@ export function mapModelsToCatalog(models, entries) {
   });
 }
 
+// Namespace cached data by endpoint only. The API key is deliberately kept
+// out of this digest: it is a credential, not a cache dimension, and a fast
+// hash is the wrong place for one. Two keys against the same endpoint may
+// therefore share a cache entry, which is safe because a catalog entry is
+// re-validated before use and a remembered model keeps its fallbacks.
 function endpointKey(config) {
-  return createHash("sha256")
-    .update(String(config.baseUrl) + "\u0000" + String(config.apiKey ?? ""))
-    .digest("hex")
-    .slice(0, 16);
+  return createHash("sha256").update(String(config.baseUrl)).digest("hex").slice(0, 16);
 }
 
 async function readJsonFile(filePath) {
@@ -1029,7 +1031,15 @@ export async function resolveModelChain(config, fetchImpl, { now = Date.now() } 
   }
   const remembered = await readModelMemo(config, entries);
   if (remembered) {
-    return { models: [remembered], entries, origin: "remembered", source: discovery.source };
+    // A remembered model is a preference, not a cliff: keep the declared
+    // models behind it so a key without access to it still generates.
+    const alternatives = declaredImageModels(entries).filter((id) => id !== remembered);
+    return {
+      models: [remembered, ...alternatives].slice(0, 10),
+      entries,
+      origin: "remembered",
+      source: discovery.source,
+    };
   }
   const declared = declaredImageModels(entries);
   if (declared.length > 0) {

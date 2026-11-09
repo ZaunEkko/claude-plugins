@@ -1450,7 +1450,7 @@ test("reuses a remembered model and reports the catalog through listModels", asy
     id: "second", prompt: "B", outputDir: path.join(directory, "output"),
   }, { cwd: directory, config: config(baseUrl, runtimeDir, settings) });
   assert.equal(second.summary.modelOrigin, "remembered");
-  assert.deepEqual(second.summary.modelChain, ["house-image-b"]);
+  assert.deepEqual(second.summary.modelChain, ["house-image-b", "house-image-a"]);
   assert.deepEqual(seenModels, ["house-image-b", "house-image-b"]);
 
   const catalog = await listModels({
