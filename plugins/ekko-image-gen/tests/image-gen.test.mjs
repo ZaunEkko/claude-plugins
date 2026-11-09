@@ -6,9 +6,13 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  declaredImageModels,
   imageDimensions,
   loadConfig,
   normalizeBaseUrl,
+  listModels,
+  mapModelsToCatalog,
+  normalizeModelName,
   normalizeRequest,
   resolveSize,
   runJobs,
@@ -49,6 +53,7 @@ function config(baseUrl, runtimeDir, overrides = {}) {
     apiKey: "test-secret-key",
     models: ["gpt-image-2"],
     model: "gpt-image-2",
+    modelDiscovery: false,
     size: "1024x1024",
     quality: "low",
     maxConcurrency: 4,
@@ -142,7 +147,7 @@ test("documents temporary loopback previews without automatic GUI launch", async
   const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
   const combinedGuidance = [skill, worker, placement, readme, ...publicDocs].join("\n");
 
-  assert.equal(manifest.version, "0.1.15");
+  assert.equal(manifest.version, "0.1.16");
   assert.match(manifest.description, /temporary loopback HTTP preview links/u);
   assert.ok(marketplaceEntry);
   assert.match(marketplaceEntry.description, /temporary loopback HTTP preview links/u);
@@ -232,11 +237,7 @@ test("loads user config and applies environment overrides", async (t) => {
   assert.equal(loaded.maxConcurrency, 2);
   assert.equal(loaded.maxImagesPerRequest, 1);
   assert.equal(loaded.maxOutputBytes, 2048);
-  assert.deepEqual(loaded.models, [
-    "gpt-image-2.5-flare",
-    "gpt-image-2.5-sunburst",
-    "gpt-image-2",
-  ]);
+  assert.deepEqual(loaded.models, []);
 
   const emptyOverrideLoaded = await loadConfig({
     configPath,
@@ -303,11 +304,8 @@ test("uses public defaults when configuration contains only endpoint and key", a
   const loaded = await loadConfig({ configPath, homeDir: directory, env: {} });
 
   assert.equal(loaded.baseUrl, "https://images.example.test/v1");
-  assert.deepEqual(loaded.models, [
-    "gpt-image-2.5-flare",
-    "gpt-image-2.5-sunburst",
-    "gpt-image-2",
-  ]);
+  assert.deepEqual(loaded.models, []);
+  assert.equal(loaded.modelDiscovery, true);
   assert.equal(loaded.maxImagesPerRequest, 4);
   assert.equal(loaded.maxOutputBytes, 50 * 1024 * 1024);
 });
@@ -1323,4 +1321,143 @@ test("reuses the resolved model for later jobs in the same run", async (t) => {
     "gpt-image-2",
   ]);
   assert.equal(attempts.length, 7);
+});
+
+test("compares model ids across namespaced and date-stamped gateways", () => {
+  assert.equal(normalizeModelName("openai/gpt-image-2.6-flare"), "gpt-image-2.6-flare");
+  assert.equal(normalizeModelName("GPT-Image-2.6-Flare-2026-11-04"), "gpt-image-2.6-flare");
+  assert.equal(normalizeModelName("vendor/group/seedream-4"), "seedream-4");
+  assert.equal(normalizeModelName("   "), "");
+
+  const entries = [
+    { id: "openai/gpt-image-2.6-flare", normalized: "gpt-image-2.6-flare" },
+    { id: "openai/gpt-image-2", normalized: "gpt-image-2" },
+  ];
+  assert.deepEqual(
+    mapModelsToCatalog(["gpt-image-2.6-flare", "unlisted-model"], entries),
+    ["openai/gpt-image-2.6-flare", "unlisted-model"],
+  );
+});
+
+test("ranks declared image models by service metadata, never by name", () => {
+  const entries = [
+    { id: "seedream-4", normalized: "seedream-4", created: 30, imageCapable: true },
+    { id: "nano-banana-2", normalized: "nano-banana-2", created: 50, imageCapable: true },
+    { id: "chat-pro", normalized: "chat-pro", created: 99, imageCapable: false },
+  ];
+  assert.deepEqual(declaredImageModels(entries), ["nano-banana-2", "seedream-4"]);
+
+  // A catalog that declares nothing yields nothing rather than a guess.
+  const silent = [
+    { id: "gpt-image-2.6-flare", normalized: "gpt-image-2.6-flare", created: 9, imageCapable: null },
+  ];
+  assert.deepEqual(declaredImageModels(silent), []);
+});
+
+test("resolves an unfamiliar image model from declared output modality", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const seenModels = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    if (request.method === "GET" && request.url.startsWith("/v1/models")) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [
+        { id: "chat-only", created: 90, architecture: { output_modalities: ["text"] } },
+        { id: "vendor/seedream-4", created: 10, architecture: { output_modalities: ["image"] } },
+        { id: "vendor/nano-banana-2", created: 70, architecture: { output_modalities: ["image"] } },
+      ] }));
+      return;
+    }
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenModels.push(body.model);
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "declared",
+    prompt: "An unfamiliar family",
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: [],
+      model: undefined,
+      modelDiscovery: true,
+    }),
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.summary.modelOrigin, "declared");
+  // Newest declared image model first; the text-only model is excluded.
+  assert.deepEqual(result.summary.modelChain, ["vendor/nano-banana-2", "vendor/seedream-4"]);
+  assert.deepEqual(seenModels, ["vendor/nano-banana-2"]);
+});
+
+test("fails with the catalog attached when nothing declares an image modality", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const baseUrl = await startServer(t, async (request, response) => {
+    if (request.method === "GET" && request.url.startsWith("/v1/models")) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "mystery-1" }, { id: "mystery-2" }] }));
+      return;
+    }
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "silent-catalog",
+    prompt: "No modality anywhere",
+    outputDir: path.join(directory, "output"),
+  }, {
+    cwd: directory,
+    config: config(baseUrl, path.join(directory, "runtime"), {
+      models: [],
+      model: undefined,
+      modelDiscovery: true,
+    }),
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.jobs[0].error.code, "model_unresolved");
+  assert.deepEqual(result.jobs[0].error.details.availableModels, ["mystery-1", "mystery-2"]);
+});
+
+test("reuses a remembered model and reports the catalog through listModels", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const runtimeDir = path.join(directory, "runtime");
+  const seenModels = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    if (request.method === "GET" && request.url.startsWith("/v1/models")) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [
+        { id: "house-image-a", created: 10, model_info: { mode: "image_generation" } },
+        { id: "house-image-b", created: 20, model_info: { mode: "image_generation" } },
+      ] }));
+      return;
+    }
+    const body = JSON.parse((await readBody(request)).toString("utf8"));
+    seenModels.push(body.model);
+    successResponse(response);
+  });
+  const settings = { models: [], model: undefined, modelDiscovery: true };
+
+  const first = await runJobs({
+    id: "first", prompt: "A", outputDir: path.join(directory, "output"),
+  }, { cwd: directory, config: config(baseUrl, runtimeDir, settings) });
+  assert.equal(first.summary.modelOrigin, "declared");
+
+  // The run records what worked, so the next run skips resolution entirely.
+  const second = await runJobs({
+    id: "second", prompt: "B", outputDir: path.join(directory, "output"),
+  }, { cwd: directory, config: config(baseUrl, runtimeDir, settings) });
+  assert.equal(second.summary.modelOrigin, "remembered");
+  assert.deepEqual(second.summary.modelChain, ["house-image-b", "house-image-a"]);
+  assert.deepEqual(seenModels, ["house-image-b", "house-image-b"]);
+
+  const catalog = await listModels({
+    config: config(baseUrl, runtimeDir, settings),
+    homeDir: directory,
+  });
+  assert.equal(catalog.declaresModality, true);
+  assert.equal(catalog.modelOrigin, "remembered");
+  assert.deepEqual(catalog.models.map((entry) => entry.id), ["house-image-a", "house-image-b"]);
 });

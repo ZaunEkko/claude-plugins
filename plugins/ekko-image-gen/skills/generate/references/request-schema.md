@@ -21,7 +21,7 @@ All remaining fields are optional advanced overrides. Their defaults are shown h
 
 ```json
 {
-  "models": ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"],
+  "models": [],
   "size": "1024x1024",
   "quality": "auto",
   "maxConcurrency": 4,
@@ -63,7 +63,17 @@ Some OpenAI-compatible gateways translate Images API calls into a Responses API 
 
 `maxOutputBytes` limits each decoded base64 image and each generated-image URL download. The default is `52428800` bytes (50 MiB). URL responses are checked by `Content-Length` when available and otherwise streamed under the limit. Before JSON parsing, each Images API response is also streamed under a derived bound: base64 expansion of `maxOutputBytes` multiplied by that upstream request's image count, plus 64 KiB for metadata. Exceeding this bound returns `response_too_large` without retrying or switching models.
 
-Model names are provider-defined even when the HTTP API is OpenAI-compatible. The repository default chain is `gpt-image-2.5-flare`, then `gpt-image-2.5-sunburst`, then `gpt-image-2`, so a normal installation omits `models` and an endpoint that exposes only one of those names still resolves through model fallback. Configure an ordered list only when the endpoint uses different names or needs explicit fallback.
+No model name is built into the runner, because every name is provider-defined and every generation of them expires. The chain is resolved per endpoint in this order:
+
+1. the user's configured `models`;
+2. the model remembered from the last successful run against that endpoint, when it still appears in the catalog;
+3. the models the service itself declares as image-capable in `GET /v1/models`, newest `created` first.
+
+Step 3 reads declared capability, never the model name: `architecture.output_modalities`, `output_modalities`, `modalities.output`, `model_info.mode`, `mode`, or `capabilities.image_generation`. Only output modality counts, since a vision chat model merely accepts image input. A catalog that declares no modality at all yields no candidates rather than a guess, and the job fails with `model_unresolved` carrying `details.availableModels`.
+
+Names are compared in a normalized form, lowercased with a leading namespace segment and a trailing `-YYYY-MM-DD` snapshot removed, so a configured `gpt-image-2` matches a catalog entry of `openai/gpt-image-2`. The catalog's literal id is what gets sent.
+
+`modelDiscovery` defaults to `true`; set it to `false` to skip the catalog request entirely and rely only on configured names. The catalog is cached per endpoint under `runtimeDir/catalog` for ten minutes, and discovery failure is never fatal.
 
 The first job that resolves a model through the configured chain records it for the rest of that run, so later jobs start from the model the endpoint actually serves instead of repeating a failed probe per job. A job that names its own `model` or `models` keeps its requested order and is never reordered, which preserves a deliberate per-job quality-tier escalation.
 

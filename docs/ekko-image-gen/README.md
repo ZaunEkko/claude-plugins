@@ -31,7 +31,7 @@
 }
 ```
 
-密钥文件位于用户目录，不进入插件仓库。普通用户只需填写 `baseUrl` 和 `apiKey`；模型默认使用 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2` 这条回退链，多图能力由真实响应自动适配。修改配置后下一次调用立即生效。
+密钥文件位于用户目录，不进入插件仓库。普通用户只需填写 `baseUrl` 和 `apiKey`；模型不写死在插件里：首次填完 `baseUrl` 和 `apiKey` 后运行 `/ekko-image-gen:models`，它会列出该服务实际提供的模型、和你一起定下优先顺序并写回配置。多图能力由真实响应自动适配。修改配置后下一次调用立即生效。
 
 `maxImagesPerRequest` 是高级可选上限，默认 `4`，有效范围 `1-4`。不配置时，如果服务对 `n: 3` 只返回一张，runner 会从真实响应推断有效单次能力，并在原始逻辑 `count` 范围内安排有界 follow-up 请求。如果服务直接以 `400` 拒绝 `n` 参数本身（常见于把 Images API 转译成 Responses API `image_generation` 工具的网关），runner 会改用单图重发并把本次运行的后续请求都限制为每次一张，仅记录警告而不让 job 失败。不同素材 job 仍可并发执行。
 
@@ -39,7 +39,11 @@
 
 如果由 Agent 协助安装，应让 Agent 检查并创建只包含 `baseUrl` 与占位 `apiKey` 的配置模板，然后提示用户直接编辑 `%USERPROFILE%\.claude\ekko-image-gen.local.json`（Windows）或 `~/.claude/ekko-image-gen.local.json`。不要在对话中粘贴 API Key。使用第三方 endpoint 时，提示词和参考图会发送到该第三方服务。
 
-仓库默认模型链为 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2`，普通用户无需填写 `models`。两个 2.5 模型 token 单价相同：`flare` 是速度档，画质对齐 `gpt-image-2`；`sunburst` 是质量档，细节与编辑精度更高。批量素材默认走 `flare`，Agent 会按 job 单独把主视觉、高细节大图、以及需要严格保留参考图特征的编辑升到 `sunburst`，不会整批升档；视觉复核不过且属于画质问题时也会对该 job 升档重试。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。同一次运行中，第一个成功命中的模型会被记住，后续 job 直接从该模型开始，不会每个 job 都重复一次失败探测；显式指定了 `model` 的 job 保持自己的优先顺序，升档不受影响。
+**插件代码里没有任何模型名。** 解析顺序是:用户配置的 `models` → 该 endpoint 上次成功用过的模型 → 服务目录里自己声明为图像能力的模型(按 `created` 取新)。都拿不到时报 `model_unresolved` 并附上完整目录，不做猜测。
+
+所以推荐的用法是:填完 url 和 key 后运行一次 `/ekko-image-gen:models`，它会列出该服务实际有什么、建议一条优先顺序、经你确认后写进配置。**换了服务商就再运行一次**，它会指出旧链里哪些模型在新目录中已不存在，并重新定链。
+
+服务商若提供速度档和质量档，批量素材默认走链首，Agent 会按 job 单独把主视觉、高细节大图、以及需要严格保留参考图特征的编辑升到质量档，不会整批升档；视觉复核不过且属于画质问题时也会对该 job 升档重试。OpenAI-compatible 描述的是 HTTP API 形状；只有目标 endpoint 使用其他模型名或需要自定义 fallback 时，才配置有序 `models` 列表。runner 会在上游、限流或模型可用性错误后自动尝试下一模型，用户要求严格固定模型时可设置 `strictModel: true`。同一次运行中，第一个成功命中的模型会被记住，后续 job 直接从该模型开始，不会每个 job 都重复一次失败探测；显式指定了 `model` 的 job 保持自己的优先顺序，升档不受影响。
 
 支持 `1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`9:16`、`16:9` 及相应的 `1k / 2k / 4k` 服务预设，也可传精确 `WIDTHxHEIGHT`。服务可能接受 4K 请求但返回较小的实际像素，部分网关甚至完全忽略 `size`（连方向都由服务决定），最终结果会同时报告请求尺寸和实际尺寸。
 

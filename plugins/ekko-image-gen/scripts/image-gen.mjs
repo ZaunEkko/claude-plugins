@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { isIP } from "node:net";
 import os from "node:os";
@@ -8,11 +8,11 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DEFAULT_MODELS = Object.freeze([
-  "gpt-image-2.5-flare",
-  "gpt-image-2.5-sunburst",
-  "gpt-image-2",
-]);
+// No model name is hard-coded. An empty chain means "resolve from the service".
+const DEFAULT_MODELS = Object.freeze([]);
+const CATALOG_TTL_MS = 10 * 60 * 1000;
+const CATALOG_MAX_BYTES = 1024 * 1024;
+const MODEL_SNAPSHOT_PATTERN = /-\d{4}-\d{2}-\d{2}$/u;
 
 const SIZE_PRESETS = Object.freeze({
   "auto@auto": "1024x1024",
@@ -33,6 +33,7 @@ const SIZE_PRESETS = Object.freeze({
 const DEFAULT_CONFIG = Object.freeze({
   baseUrl: "http://localhost:3050/v1",
   models: DEFAULT_MODELS,
+  modelDiscovery: true,
   size: "1024x1024",
   quality: "auto",
   maxConcurrency: 4,
@@ -119,9 +120,6 @@ function normalizeModels(value, fallback = DEFAULT_MODELS) {
       ? value.split(",")
       : fallback;
   const models = uniqueStrings(raw);
-  if (models.length === 0) {
-    throw new ImageGenError("At least one image model is required", { code: "invalid_config" });
-  }
   if (models.length > 10) {
     throw new ImageGenError("At most 10 fallback models are supported", { code: "invalid_config" });
   }
@@ -251,6 +249,7 @@ function mergeEnvironment(fileConfig, env) {
     maxInputBytes: override("EKKO_IMAGE_GEN_MAX_INPUT_BYTES", fileConfig.maxInputBytes),
     maxOutputBytes: override("EKKO_IMAGE_GEN_MAX_OUTPUT_BYTES", fileConfig.maxOutputBytes),
     runtimeDir: override("EKKO_IMAGE_GEN_RUNTIME_DIR", fileConfig.runtimeDir),
+    modelDiscovery: override("EKKO_IMAGE_GEN_MODEL_DISCOVERY", fileConfig.modelDiscovery),
   };
 }
 
@@ -324,16 +323,20 @@ export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
     runtimeDir: path.resolve(
       nonEmptyString(raw.runtimeDir) ?? path.join(homeDir, ".claude", "ekko-image-gen", "runtime"),
     ),
+    modelDiscovery: optionalBoolean(raw.modelDiscovery, DEFAULT_CONFIG.modelDiscovery),
   };
 }
 
-export async function loadConfig({ env = process.env, homeDir = os.homedir(), configPath } = {}) {
-  const environmentConfigPath = nonEmptyString(env.EKKO_IMAGE_GEN_CONFIG);
-  const resolvedPath = path.resolve(
+export function resolveConfigPath({ env = process.env, homeDir = os.homedir(), configPath } = {}) {
+  return path.resolve(
     configPath ??
-      environmentConfigPath ??
+      nonEmptyString(env.EKKO_IMAGE_GEN_CONFIG) ??
       path.join(homeDir, ".claude", "ekko-image-gen.local.json"),
   );
+}
+
+export async function loadConfig({ env = process.env, homeDir = os.homedir(), configPath } = {}) {
+  const resolvedPath = resolveConfigPath({ env, homeDir, configPath });
   let fileConfig = {};
   try {
     fileConfig = JSON.parse(await fs.readFile(resolvedPath, "utf8"));
@@ -835,12 +838,230 @@ function shouldFallbackModel(error) {
   return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
-function orderJobModels(job, runtime) {
-  const resolved = nonEmptyString(runtime.resolvedModel);
-  if (job.explicitModel || !resolved || !job.models.includes(resolved)) {
-    return job.models;
+function optionalBoolean(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
   }
-  return [resolved, ...job.models.filter((model) => model !== resolved)];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+  return fallback;
+}
+
+// Compare model ids across gateways that namespace or date-stamp them, for
+// example "openai/gpt-image-2.6-flare-2026-11-04" and "gpt-image-2.6-flare".
+export function normalizeModelName(value) {
+  let name = String(value ?? "").trim().toLowerCase();
+  if (!name) {
+    return "";
+  }
+  const separator = name.lastIndexOf("/");
+  if (separator >= 0) {
+    name = name.slice(separator + 1);
+  }
+  return name.replace(MODEL_SNAPSHOT_PATTERN, "");
+}
+
+// Image capability comes from what the service declares about its own models,
+// never from the model name, so unfamiliar families still resolve. Only OUTPUT
+// modality counts: a vision chat model merely accepts image input.
+export function detectImageCapability(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const outputs = [
+    entry.architecture?.output_modalities,
+    entry.output_modalities,
+    entry.modalities?.output,
+  ].find(Array.isArray);
+  if (outputs) {
+    return outputs.some((item) => String(item).toLowerCase().includes("image"));
+  }
+  const mode = nonEmptyString(entry.model_info?.mode) ?? nonEmptyString(entry.mode);
+  if (mode) {
+    return mode.toLowerCase().replace(/[^a-z]+/gu, "_").includes("image_generation");
+  }
+  if (typeof entry.capabilities?.image_generation === "boolean") {
+    return entry.capabilities.image_generation;
+  }
+  return null;
+}
+
+function catalogEntries(rawEntries) {
+  return rawEntries
+    .filter((entry) => nonEmptyString(entry?.id))
+    .map((entry) => ({
+      id: nonEmptyString(entry.id),
+      normalized: normalizeModelName(entry.id),
+      created: Number.isFinite(entry.created) ? entry.created : 0,
+      imageCapable: detectImageCapability(entry),
+    }));
+}
+
+// Declared image models, newest first. "created" is service-supplied and
+// family-agnostic. When nothing declares a modality the list is empty rather
+// than guessed: an undeclared model is unknown, not disqualified.
+export function declaredImageModels(entries) {
+  if (!entries.some((entry) => entry.imageCapable !== null)) {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.imageCapable === true)
+    .sort((left, right) => right.created - left.created || left.id.localeCompare(right.id))
+    .map((entry) => entry.id);
+}
+
+// Keep a configured name usable when the gateway namespaces it: match on the
+// normalized form, then send the catalog id verbatim.
+export function mapModelsToCatalog(models, entries) {
+  return models.map((model) => {
+    const normalized = normalizeModelName(model);
+    const match = entries.find((entry) => entry.normalized === normalized);
+    return match ? match.id : model;
+  });
+}
+
+// Namespace cached data by endpoint only. The API key is deliberately kept
+// out of this digest: it is a credential, not a cache dimension, and a fast
+// hash is the wrong place for one. Two keys against the same endpoint may
+// therefore share a cache entry, which is safe because a catalog entry is
+// re-validated before use and a remembered model keeps its fallbacks.
+function endpointKey(config) {
+  return createHash("sha256").update(String(config.baseUrl)).digest("hex").slice(0, 16);
+}
+
+async function readJsonFile(filePath) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function writeJsonFile(filePath, value) {
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(value), "utf8");
+  } catch {
+    // A cache write is best-effort and must never fail a generation.
+  }
+}
+
+async function fetchModelCatalog(config, fetchImpl, { now = Date.now() } = {}) {
+  const cachePath = path.join(config.runtimeDir, "catalog", endpointKey(config) + ".json");
+  const cached = await readJsonFile(cachePath);
+  if (cached && Number.isFinite(cached.fetchedAt) && now - cached.fetchedAt < CATALOG_TTL_MS) {
+    return { entries: catalogEntries(cached.entries ?? []), source: "cache" };
+  }
+  try {
+    const body = await fetchWithTimeout(
+      fetchImpl,
+      config.baseUrl + "/models",
+      { method: "GET", headers: { Authorization: "Bearer " + config.apiKey } },
+      config.timeoutMs,
+      async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+        const bytes = await readResponseBytes(
+          response,
+          CATALOG_MAX_BYTES,
+          "Model catalog response exceeds the bounded response limit",
+          { code: "catalog_too_large" },
+        );
+        return JSON.parse(bytes.toString("utf8"));
+      },
+    );
+    const rawEntries = Array.isArray(body?.data) ? body.data : [];
+    if (rawEntries.length > 0) {
+      await writeJsonFile(cachePath, { fetchedAt: now, entries: rawEntries });
+    }
+    return { entries: catalogEntries(rawEntries), source: "service" };
+  } catch {
+    // Discovery is advisory. A gateway without /v1/models still generates.
+    return { entries: cached ? catalogEntries(cached.entries ?? []) : [], source: "unavailable" };
+  }
+}
+
+function memoPath(config) {
+  return path.join(config.runtimeDir, "models", endpointKey(config) + ".json");
+}
+
+async function readModelMemo(config, entries) {
+  const memo = await readJsonFile(memoPath(config));
+  const model = nonEmptyString(memo?.model);
+  if (!model) {
+    return null;
+  }
+  if (entries.length === 0) {
+    return model;
+  }
+  const normalized = normalizeModelName(model);
+  const match = entries.find((entry) => entry.normalized === normalized);
+  return match ? match.id : null;
+}
+
+export async function rememberModel(config, model) {
+  if (!nonEmptyString(model)) {
+    return;
+  }
+  await writeJsonFile(memoPath(config), { model, recordedAt: Date.now() });
+}
+
+export async function resolveModelChain(config, fetchImpl, { now = Date.now() } = {}) {
+  const discovery = config.modelDiscovery
+    ? await fetchModelCatalog(config, fetchImpl, { now })
+    : { entries: [], source: "disabled" };
+  const entries = discovery.entries;
+
+  if (config.models.length > 0) {
+    return {
+      models: mapModelsToCatalog(config.models, entries),
+      entries,
+      origin: "configured",
+      source: discovery.source,
+    };
+  }
+  const remembered = await readModelMemo(config, entries);
+  if (remembered) {
+    // A remembered model is a preference, not a cliff: keep the declared
+    // models behind it so a key without access to it still generates.
+    const alternatives = declaredImageModels(entries).filter((id) => id !== remembered);
+    return {
+      models: [remembered, ...alternatives].slice(0, 10),
+      entries,
+      origin: "remembered",
+      source: discovery.source,
+    };
+  }
+  const declared = declaredImageModels(entries);
+  if (declared.length > 0) {
+    return {
+      models: declared.slice(0, 10),
+      entries,
+      origin: "declared",
+      source: discovery.source,
+    };
+  }
+  return { models: [], entries, origin: "unresolved", source: discovery.source };
+}
+
+function orderJobModels(job, runtime) {
+  const base = job.explicitModel
+    ? mapModelsToCatalog(job.models, runtime.entries ?? [])
+    : (runtime.chain ?? job.models);
+  const resolved = nonEmptyString(runtime.resolvedModel);
+  if (job.explicitModel || !resolved || !base.includes(resolved)) {
+    return base;
+  }
+  return [resolved, ...base.filter((model) => model !== resolved)];
 }
 
 function isMultiImageCountRejection(error, requestedCount) {
@@ -1202,6 +1423,16 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
   );
   const mode = inputs.length > 0 ? "edit" : "generate";
   const orderedModels = orderJobModels(job, runtime);
+  if (orderedModels.length === 0) {
+    throw new ImageGenError(
+      "No image model could be resolved for this service. Set models in the user configuration, pass model on the job, or run the ekko-image-gen models skill.",
+      {
+        code: "model_unresolved",
+        details: { availableModels: (runtime.entries ?? []).map((entry) => entry.id) },
+      },
+    );
+  }
+  job = { ...job, models: orderedModels };
   const requestCounts = splitRequestCounts(
     job.count,
     runtime.multiImageCap ?? config.maxImagesPerRequest,
@@ -1262,6 +1493,7 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
           selectedModel = model;
           if (!job.explicitModel) {
             runtime.resolvedModel = model;
+            runtime.successfulModel = model;
           }
           modelAttempts.push({ model, status: "ok", code: null, httpStatus: 200 });
           break;
@@ -1468,7 +1700,14 @@ export async function runJobs(payload, options = {}) {
 
   const request = normalizeRequest(payload, config, { cwd });
   const startedAt = Date.now();
-  const runtime = { multiImageCap: null, resolvedModel: null };
+  const resolution = await resolveModelChain(config, fetchImpl);
+  const runtime = {
+    multiImageCap: null,
+    resolvedModel: null,
+    successfulModel: null,
+    chain: resolution.models,
+    entries: resolution.entries,
+  };
   const jobs = await mapLimit(request.jobs, request.concurrency, async (job) => {
     try {
       return await runJob(job, config, fetchImpl, cwd, runtime);
@@ -1476,6 +1715,9 @@ export async function runJobs(payload, options = {}) {
       return errorResult(job, error, config.apiKey);
     }
   });
+  if (resolution.origin !== "configured" && nonEmptyString(runtime.successfulModel)) {
+    await rememberModel(config, runtime.successfulModel);
+  }
   const succeeded = jobs.filter((job) => job.status === "ok").length;
   const partial = jobs.filter((job) => job.status === "partial").length;
   const failed = jobs.filter((job) => job.status === "error").length;
@@ -1490,13 +1732,74 @@ export async function runJobs(payload, options = {}) {
       durationMs: Date.now() - startedAt,
       concurrency: request.concurrency,
       globalConcurrency: config.maxGlobalConcurrency,
+      modelOrigin: resolution.origin,
+      modelChain: resolution.models,
     },
     jobs,
   };
 }
 
+export async function listModels(options = {}) {
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const config = options.config
+    ? normalizeConfig(options.config, { homeDir: options.homeDir ?? os.homedir() })
+    : await loadConfig(options);
+  if (!config.apiKey) {
+    throw new ImageGenError(
+      "Missing API key. Set EKKO_IMAGE_GEN_API_KEY or ~/.claude/ekko-image-gen.local.json",
+      { code: "missing_api_key" },
+    );
+  }
+  const resolution = await resolveModelChain(config, fetchImpl);
+  return {
+    status: "ok",
+    baseUrl: config.baseUrl,
+    catalogSource: resolution.source,
+    modelOrigin: resolution.origin,
+    resolvedChain: resolution.models,
+    declaresModality: resolution.entries.some((entry) => entry.imageCapable !== null),
+    models: resolution.entries.map((entry) => ({
+      id: entry.id,
+      imageCapable: entry.imageCapable,
+      created: entry.created || null,
+    })),
+  };
+}
+
+export async function setConfiguredModels(models, options = {}) {
+  const chain = normalizeModels(models, []);
+  const targetPath = resolveConfigPath(options);
+  let existing = {};
+  try {
+    existing = JSON.parse(await fs.readFile(targetPath, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw new ImageGenError("Cannot update " + targetPath + ": " + error.message, {
+        code: "invalid_config",
+      });
+    }
+  }
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+    throw new ImageGenError("Refusing to overwrite a non-object config at " + targetPath, {
+      code: "invalid_config",
+    });
+  }
+  const updated = { ...existing };
+  if (chain.length > 0) {
+    updated.models = chain;
+  } else {
+    delete updated.models;
+  }
+  delete updated.model;
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  const temporaryPath = targetPath + ".tmp-" + randomUUID();
+  await fs.writeFile(temporaryPath, JSON.stringify(updated, null, 2) + "\n", "utf8");
+  await fs.rename(temporaryPath, targetPath);
+  return { status: "ok", configPath: targetPath, models: chain };
+}
+
 function helpText() {
-  return `Usage: node image-gen.mjs [--request FILE]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR.\n`;
+  return `Usage: node image-gen.mjs [--request FILE | --list-models | --set-models LIST]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR, EKKO_IMAGE_GEN_MODEL_DISCOVERY.\n`;
 }
 
 async function readStdin() {
@@ -1510,6 +1813,20 @@ async function readStdin() {
 async function readPayload(argv) {
   if (argv.includes("--help") || argv.includes("-h")) {
     return { help: true };
+  }
+  if (argv.includes("--list-models")) {
+    return { listModels: true };
+  }
+  const setModelsIndex = argv.indexOf("--set-models");
+  if (setModelsIndex >= 0) {
+    const value = argv[setModelsIndex + 1];
+    if (value === undefined) {
+      throw new ImageGenError(
+        "--set-models requires a comma-separated model list, or an empty string to clear it",
+        { code: "invalid_request" },
+      );
+    }
+    return { setModels: value };
   }
   const requestIndex = argv.indexOf("--request");
   if (requestIndex >= 0) {
@@ -1533,6 +1850,16 @@ export async function main(argv = process.argv.slice(2)) {
     const input = await readPayload(argv);
     if (input.help) {
       process.stdout.write(helpText());
+      return 0;
+    }
+    if (input.listModels) {
+      const catalog = await listModels();
+      process.stdout.write(JSON.stringify(catalog, null, 2) + "\n");
+      return 0;
+    }
+    if (input.setModels !== undefined) {
+      const written = await setConfiguredModels(input.setModels);
+      process.stdout.write(JSON.stringify(written, null, 2) + "\n");
       return 0;
     }
     const result = await runJobs(input.payload);

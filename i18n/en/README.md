@@ -126,7 +126,7 @@ Create `~/.claude/ekko-image-gen.local.json` (`%USERPROFILE%\.claude\ekko-image-
 }
 ```
 
-The endpoint may be localhost or a third-party HTTPS service. Do not commit the real key or paste it into an Agent conversation. The default model chain is `gpt-image-2.5-flare`, then `gpt-image-2.5-sunburst`, then `gpt-image-2`, and the runner automatically completes logical multi-image counts after short provider responses or after an upstream rejects the `n` parameter. Both 2.5 models share the same token rates: `flare` favors speed and `sunburst` favors rendering precision, and the parent agent assigns the tier per asset instead of escalating a whole batch.
+The endpoint may be localhost or a third-party HTTPS service. Do not commit the real key or paste it into an Agent conversation. No model name is built into the plugin. After filling in the URL and key, run `/ekko-image-gen:models`: it reads the service's own model catalog, agrees a preferred order with you, and writes it back to the configuration; run it again after switching provider. The runner still completes logical multi-image counts automatically after short provider responses or after an upstream rejects the `n` parameter.
 
 #### 4. Choose a scope
 

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.4.0 - 2026-11-09
+
+### Added
+
+- Added service-driven image model resolution to `ekko-image-gen` and removed every hard-coded model name from the runner. The chain is resolved per endpoint from the user's configured `models`, then the model remembered from the last successful run, then the models the service declares as image-capable in its own `GET /v1/models` catalog, newest first.
+- Added capability detection that reads declared output modality (`architecture.output_modalities`, `output_modalities`, `modalities.output`, `model_info.mode`, `mode`, `capabilities.image_generation`) instead of model names, so unfamiliar families resolve as readily as familiar ones, and input-only vision models are excluded.
+- Added normalized name comparison that ignores a leading namespace segment and a trailing dated snapshot, so a configured `gpt-image-2` matches a gateway entry of `openai/gpt-image-2` while the catalog's literal id is what gets sent.
+- Added the `/ekko-image-gen:models` skill, which lists what the configured service actually offers, flags configured models that no longer exist after a provider change, agrees a preferred order with the user, and writes it back through an atomic update that leaves the API key and every other field untouched.
+- Added `--list-models` and `--set-models` to the runner so the skill and automatic resolution share one implementation, plus a per-endpoint catalog cache and a `modelDiscovery` switch.
+- Added a `model_unresolved` error that carries `details.availableModels` when a catalog declares no modality at all, so the orchestrating agent can choose from the real list instead of the runner guessing.
+- Added isolated tests for name normalization, metadata-ranked selection over unfamiliar families, the unresolved catalog path, and remembered-model reuse across runs.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.16`, and rewrote the generate skill's model-tier guidance to read tiers from the resolved chain rather than from named GPT Image 2.5 models.
+- Reported `modelOrigin` and `modelChain` in every run summary so callers can see how a model was chosen.
 ## 2.3.1 - 2026-10-09
 
 ### Changed
