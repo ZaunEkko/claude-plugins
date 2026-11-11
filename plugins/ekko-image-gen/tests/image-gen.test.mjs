@@ -147,7 +147,7 @@ test("documents temporary loopback previews without automatic GUI launch", async
   const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
   const combinedGuidance = [skill, worker, placement, readme, ...publicDocs].join("\n");
 
-  assert.equal(manifest.version, "0.1.17");
+  assert.equal(manifest.version, "0.1.18");
   assert.match(manifest.description, /temporary loopback HTTP preview links/u);
   assert.ok(marketplaceEntry);
   assert.match(marketplaceEntry.description, /temporary loopback HTTP preview links/u);
@@ -1462,15 +1462,7 @@ test("reuses a remembered model and reports the catalog through listModels", asy
   assert.deepEqual(catalog.models.map((entry) => entry.id), ["house-image-a", "house-image-b"]);
 });
 
-async function outputFiles(directory) {
-  try {
-    return (await fs.readdir(directory)).sort();
-  } catch {
-    return [];
-  }
-}
-
-test("sends GPT Image 2.6 fields only when a job or the config sets them", async (t) => {
+test("passes provider-specific extraParams through without interpreting them", async (t) => {
   const directory = await temporaryDirectory(t);
   const bodies = [];
   const baseUrl = await startServer(t, async (request, response) => {
@@ -1479,64 +1471,93 @@ test("sends GPT Image 2.6 fields only when a job or the config sets them", async
   });
   const runtimeDir = path.join(directory, "runtime");
 
-  await runJobs({ id: "plain", prompt: "A", outputDir: path.join(directory, "a") }, {
+  const plain = await runJobs({ id: "plain", prompt: "A", outputDir: path.join(directory, "a") }, {
     cwd: directory,
     config: config(baseUrl, runtimeDir),
   });
-  // A job that sets none of the new fields keeps the request shape older
-  // services already accept.
-  for (const key of ["output_format", "complexity"]) {
-    assert.equal(key in bodies[0], false, key + " must not be sent by default");
-  }
+  // Without extraParams the request carries only the runner's own fields.
+  assert.deepEqual(Object.keys(bodies[0]).sort(), ["model", "n", "prompt", "quality", "size"]);
+  assert.deepEqual(plain.jobs[0].extraParamNames, []);
+  assert.equal(plain.jobs[0].files[0].format, "image/png");
 
-  await runJobs({
+  const result = await runJobs({
     concurrency: 1,
     jobs: [
       { id: "inherits", prompt: "B", outputDir: path.join(directory, "b") },
-      { id: "overrides", prompt: "C", outputDir: path.join(directory, "c"), complexity: "LOW", outputFormat: "png" },
+      {
+        id: "overrides",
+        prompt: "C",
+        outputDir: path.join(directory, "c"),
+        extraParams: { complexity: "low", vendor_seed: 7 },
+      },
     ],
   }, {
     cwd: directory,
-    config: config(baseUrl, runtimeDir, { complexity: "medium" }),
+    config: config(baseUrl, runtimeDir, {
+      extraParams: { complexity: "medium", vendor_options: { style: "flat" } },
+    }),
   });
+  assert.equal(result.status, "ok");
   assert.equal(bodies[1].complexity, "medium");
-  assert.equal("output_format" in bodies[1], false);
+  assert.deepEqual(bodies[1].vendor_options, { style: "flat" });
   assert.equal(bodies[2].complexity, "low");
-  assert.equal(bodies[2].output_format, "png");
+  assert.equal(bodies[2].vendor_seed, 7);
+  assert.deepEqual(bodies[2].vendor_options, { style: "flat" });
+  assert.deepEqual(
+    result.jobs[1].extraParamNames.sort(),
+    ["complexity", "vendor_options", "vendor_seed"],
+  );
 });
 
-test("reports a format mismatch when a service ignores output_format", async (t) => {
+test("sends extraParams as form fields on image edits", async (t) => {
   const directory = await temporaryDirectory(t);
+  const referencePath = path.join(directory, "reference.png");
+  await fs.writeFile(referencePath, PNG_BYTES);
+  let multipartBody = "";
   const baseUrl = await startServer(t, async (request, response) => {
-    await readBody(request);
+    multipartBody = (await readBody(request)).toString("latin1");
     successResponse(response);
   });
 
   const result = await runJobs({
-    id: "downgraded",
-    prompt: "A red circle",
+    id: "edit",
+    prompt: "Turn it red",
+    images: referencePath,
     outputDir: path.join(directory, "output"),
-    outputName: "circle",
-    outputFormat: "webp",
+    extraParams: { complexity: "low", input_fidelity: "high" },
   }, { cwd: directory, config: config(baseUrl, path.join(directory, "runtime")) });
 
-  const job = result.jobs[0];
   assert.equal(result.status, "ok");
-  // Named by the bytes that arrived, never by the format that was requested.
-  assert.deepEqual(await outputFiles(path.join(directory, "output")), ["circle.png"]);
-  assert.equal(job.files[0].format, "image/png");
-  assert.equal(job.files[0].formatMatched, false);
-  assert.ok(job.warnings.includes("Requested webp output, but the service returned image/png"));
+  assert.match(multipartBody, /name="complexity"\r\n\r\nlow\r\n/u);
+  assert.match(multipartBody, /name="input_fidelity"\r\n\r\nhigh\r\n/u);
 });
 
-test("rejects unsupported output formats and complexity values", () => {
-  const settings = config("http://localhost:3050/v1", path.resolve("runtime"));
+test("rejects reserved, malformed, and structured edit extraParams", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const settings = config("http://localhost:3050/v1", path.join(directory, "runtime"));
   const reject = (job, pattern) => assert.throws(
-    () => normalizeRequest({ id: "x", prompt: "x", ...job }, settings, { cwd: path.resolve("project") }),
+    () => normalizeRequest({ id: "x", prompt: "x", ...job }, settings, { cwd: directory }),
     pattern,
   );
-  for (const outputFormat of ["svg", "gif", "tiff"]) {
-    reject({ outputFormat }, /outputFormat must be png, jpeg, or webp/u);
+  for (const name of ["model", "prompt", "n", "size", "quality", "history_disabled", "image", "Image[]"]) {
+    reject({ extraParams: { [name]: "x" } }, /is set by the runner and cannot be overridden/u);
   }
-  reject({ complexity: "extreme" }, /complexity must be low, medium, or high/u);
+  reject({ extraParams: "complexity=low" }, /must be an object of provider-specific request fields/u);
+  reject({ extraParams: ["complexity"] }, /must be an object of provider-specific request fields/u);
+  reject({ extraParams: { "  ": 1 } }, /must not contain an empty field name/u);
+  reject(
+    { images: ["reference.png"], extraParams: { vendor_options: { style: "flat" } } },
+    /must be a string, number, or boolean for an image edit/u,
+  );
+
+  const configPath = path.join(directory, "config.json");
+  await fs.writeFile(configPath, JSON.stringify({
+    baseUrl: "https://images.example.test/v1",
+    apiKey: "file-key",
+    extraParams: { model: "forced" },
+  }));
+  await assert.rejects(
+    loadConfig({ configPath, homeDir: directory, env: {} }),
+    (error) => error.code === "invalid_config" && /cannot be overridden/u.test(error.message),
+  );
 });

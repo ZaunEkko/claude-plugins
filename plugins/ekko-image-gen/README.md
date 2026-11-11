@@ -52,7 +52,7 @@ plugins/ekko-image-gen/
 - `POST /v1/images/edits`
 - 文生图与 multipart 图生图均已对真实 endpoint 验证；模型名由解析层从服务目录得出，不写死在代码里
 - `quality` 支持 `auto / low / medium / high / xhigh / max`；`xhigh` 与 `max` 是 GPT Image 2.5 新增档位，早于 2.5 的服务会在上游拒绝
-- 可选的 `outputFormat`（`png` / `jpeg` / `webp`）与 GPT Image 2.6 的 `complexity`，只在显式设置时才发送。保存的文件按**实际字节**命名并报告 `format` 与 `formatMatched`，服务没有按请求格式返回时会如实告警。不支持 SVG 与 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，其他服务商没有
+- 服务商私有参数通过 `extraParams` 原样透传，插件不实现任何一家的私有字段；需要时在配置里加一行即可，例如 GPT Image 2.6 的 `complexity`。不设置就不发送任何额外字段。保存的文件按**实际字节**命名并报告 `format`。不支持 SVG 与 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，其他服务商没有
 - 可配置的模型 fallback；较早的兼容服务也验证过 `plus-codex-gpt-image-2` 与 `codex-gpt-image-2`
 - 逻辑 `n` / `count` 范围 `1-4`；可按高级 provider cap、真实短返回，或上游对 `n` 参数的直接拒绝，自动拆成串行单图请求
 - 多参考图使用 OpenAI 文档约定的重复 `image[]` multipart 字段；单参考图保留已验证的 `image` 兼容路径
