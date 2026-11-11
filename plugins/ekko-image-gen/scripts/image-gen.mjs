@@ -83,9 +83,7 @@ const OUTPUT_FORMAT_MIME = new Map([
 const SUPPORTED_OUTPUT_FORMATS = new Set(OUTPUT_FORMAT_MIME.keys());
 // Animated and vector output: one document per request, text-to-image only.
 const SINGLE_OUTPUT_FORMATS = new Set(["gif", "svg"]);
-const SVG_PROLOGUE_PATTERN =
-  /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/iu;
-const SVG_CLOSING_PATTERN = /<\/svg>\s*$/iu;
+const SVG_PROLOGUE_MAX_ITEMS = 64;
 // Content that turns a picture into a program. A generated illustration never
 // needs any of it, and an SVG asset dropped into a web project with it is a
 // stored script.
@@ -1309,9 +1307,57 @@ function utf8Text(bytes) {
 // SVG is text, so it has no magic number. It is accepted only as output and
 // only when the job asked for it; the shared detector, which also screens
 // reference inputs and preview files, deliberately never recognizes it.
+// Linear scan: each step advances with indexOf, so no input can make it
+// backtrack. Accepts an optional BOM, XML declaration, comments and a
+// doctype in front of the root <svg> element.
+function startsWithSvgRoot(text) {
+  let index = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const skipWhitespace = () => {
+    while (index < text.length && " \t\r\n".includes(text[index])) {
+      index += 1;
+    }
+  };
+  const startsWithAt = (token) =>
+    text.slice(index, index + token.length).toLowerCase() === token;
+  skipWhitespace();
+  if (startsWithAt("<?xml")) {
+    const end = text.indexOf("?>", index);
+    if (end < 0) {
+      return false;
+    }
+    index = end + 2;
+    skipWhitespace();
+  }
+  for (let item = 0; item < SVG_PROLOGUE_MAX_ITEMS; item += 1) {
+    if (startsWithAt("<!--")) {
+      const end = text.indexOf("-->", index + 4);
+      if (end < 0) {
+        return false;
+      }
+      index = end + 3;
+    } else if (startsWithAt("<!doctype")) {
+      const end = text.indexOf(">", index);
+      if (end < 0) {
+        return false;
+      }
+      index = end + 1;
+    } else {
+      break;
+    }
+    skipWhitespace();
+  }
+  if (!startsWithAt("<svg")) {
+    return false;
+  }
+  const next = text[index + 4];
+  return next === ">" || (next !== undefined && " \t\r\n".includes(next));
+}
+
 export function detectSvgDocument(bytes) {
   const text = utf8Text(bytes);
-  return text !== null && SVG_PROLOGUE_PATTERN.test(text.slice(0, 4096)) && SVG_CLOSING_PATTERN.test(text);
+  return text !== null
+    && startsWithSvgRoot(text)
+    && text.trimEnd().toLowerCase().endsWith("</svg>");
 }
 
 function validatedResponseImage(bytes, message, { allowSvg = false } = {}) {

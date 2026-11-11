@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   declaredImageModels,
+  detectSvgDocument,
   imageDimensions,
   loadConfig,
   normalizeBaseUrl,
@@ -1633,4 +1634,31 @@ test("requests animated GIF frames and rejects invalid 2.6 combinations", async 
   reject({ outputFormat: "gif", frameDurationMs: 5000 }, /frameDurationMs must be an integer from 20 to 2000/u);
   reject({ outputFormat: "tiff" }, /outputFormat must be png, jpeg, webp, gif, or svg/u);
   reject({ complexity: "extreme" }, /complexity must be low, medium, or high/u);
+});
+
+test("detects SVG documents in linear time", () => {
+  const accept = [
+    '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+    '\uFEFF  <?xml version="1.0"?>\n<!-- a -->\n<!DOCTYPE svg>\n<!-- b --><svg>\n</svg>\n',
+    '<SVG viewBox="0 0 1 1"></SVG>',
+  ];
+  const reject = [
+    '<html><svg></svg></html>',
+    '<svgx></svgx>',
+    '<svg viewBox="0 0 1 1"><circle',
+    '<!-- never closed <svg></svg>',
+  ];
+  for (const text of accept) {
+    assert.equal(detectSvgDocument(Buffer.from(text, "utf8")), true, text);
+  }
+  for (const text of reject) {
+    assert.equal(detectSvgDocument(Buffer.from(text, "utf8")), false, text);
+  }
+
+  // The input CodeQL flagged: exponential for a backtracking pattern, linear here.
+  const hostile = Buffer.from("<!--" + "--><!--".repeat(200000), "utf8");
+  const started = process.hrtime.bigint();
+  assert.equal(detectSvgDocument(hostile), false);
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(elapsedMs < 1000, "took " + elapsedMs + " ms");
 });
