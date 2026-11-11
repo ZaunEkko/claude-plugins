@@ -3,7 +3,7 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", "打开刚才生成的图片", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns absolute paths plus temporary loopback HTTP preview links that terminal users can Ctrl/Cmd+click without an automatic GUI launch.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.16
+version: 0.1.17
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -102,6 +102,19 @@ Choose aspect ratio and resolution from the consuming context:
 
 Supported UI-derived presets are documented in `references/request-schema.md`. Prefer a preset over manually approximating its dimensions. Treat 4K as a requested generation tier, not a guarantee that the upstream model returns exactly 3840×2160 or 2160×3840. Inspect the runner's actual `width`, `height`, and `sizeMatched` fields and report any mismatch.
 
+### Choose output format and complexity
+
+Leave `outputFormat` and `complexity` unset unless the asset calls for them; unset, the request keeps the shape every service accepts.
+
+| Need | Setting |
+|---|---|
+| Logo, icon, or illustration that must scale cleanly | `outputFormat: "svg"` |
+| Short loop, sticker, or simple motion | `outputFormat: "gif"`, with `frameCount` and `frameDurationMs` when timing matters |
+| Bulk drafts or quick exploration where latency matters more than layout care | `complexity: "low"` |
+| Dense composition, many elements, or precise layout | leave `complexity` unset or `"high"` |
+
+SVG and GIF exist only for text-to-image; do not request them for an edit with reference images. Support varies by service: a service may refuse GIF outright, or accept an SVG request and return a raster image. Check each file's `format` and `formatMatched` and tell the user plainly when the requested format did not arrive, instead of describing a PNG as a vector.
+
 ## Choose direct or multi-agent execution
 
 ### One simple job
@@ -136,7 +149,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 ## Inspect and accept results
 
 1. Collect every successful local path, including partial successes.
-2. Call `Read` on each generated image so a capable Claude Code UI can render it and so the parent agent can inspect the actual pixels.
+2. Call `Read` on each generated image so a capable Claude Code UI can render it and so the parent agent can inspect the actual pixels. An SVG reads as markup rather than a picture: review its structure, `viewBox`, and shapes, and say that it was checked as markup, not viewed. A GIF may show a single frame; say so rather than claiming the animation was reviewed.
 3. Compare each image with its job criteria and compare related assets with the shared direction.
 4. Check subject, composition, dimensions, background intent, legibility, unwanted text, obvious artifacts, identity preservation, and consistency with neighboring assets.
 5. Compare `requestedCount` with `returnedCount`, surface count-shortfall warnings, and preserve every file from a `partial` job.
@@ -146,7 +159,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 
 ## Create clickable preview links
 
-Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin:
+Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin. Leave SVG files out: the helper deliberately does not serve them, so return their absolute paths only.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/preview-image.mjs" <<'EKKO_IMAGE_PREVIEW'

@@ -3,7 +3,7 @@ name: models
 description: This skill should be used when the user asks to "看看有哪些模型", "获取模型列表", "我换了服务商", "换了 url 和 key", "配置图片模型", "优先用哪个模型", "model_unresolved", "没有可用的图片模型", or invokes `/ekko-image-gen:models`. It reads the configured OpenAI-compatible endpoint's own model catalog, works out which entries generate images, proposes a preferred order with the user, and writes the confirmed chain into the user's local configuration.
 argument-hint: "（可选）偏好说明，例如「优先速度」「主要做图生图」或某个模型名"
 allowed-tools: Bash
-version: 0.1.16
+version: 0.1.17
 ---
 
 # Choose the image models for the configured service

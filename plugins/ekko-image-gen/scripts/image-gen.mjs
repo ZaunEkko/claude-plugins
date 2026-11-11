@@ -72,6 +72,25 @@ const MODEL_FALLBACK_MESSAGE_PATTERNS = Object.freeze([
   /\bno such\s+(?:model|deployment)\b/iu,
 ]);
 const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high", "xhigh", "max"]);
+const SUPPORTED_COMPLEXITIES = new Set(["low", "medium", "high"]);
+const OUTPUT_FORMAT_MIME = new Map([
+  ["png", "image/png"],
+  ["jpeg", "image/jpeg"],
+  ["webp", "image/webp"],
+  ["gif", "image/gif"],
+  ["svg", "image/svg+xml"],
+]);
+const SUPPORTED_OUTPUT_FORMATS = new Set(OUTPUT_FORMAT_MIME.keys());
+// Animated and vector output: one document per request, text-to-image only.
+const SINGLE_OUTPUT_FORMATS = new Set(["gif", "svg"]);
+const SVG_PROLOGUE_PATTERN =
+  /^\uFEFF?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/iu;
+const SVG_CLOSING_PATTERN = /<\/svg>\s*$/iu;
+// Content that turns a picture into a program. A generated illustration never
+// needs any of it, and an SVG asset dropped into a web project with it is a
+// stored script.
+const SVG_ACTIVE_CONTENT_PATTERN =
+  /<script[\s>\/]|<foreignObject[\s>\/]|\son[a-z]+\s*=|(?:href|src)\s*=\s*["']?\s*javascript:/iu;
 const MULTI_IMAGE_REJECTION_STATUSES = new Set([400, 422]);
 const MULTI_IMAGE_REJECTION_PARAM_PATTERN = /(?:^|\.)n$/u;
 const MULTI_IMAGE_REJECTION_MESSAGE_PATTERN =
@@ -234,6 +253,7 @@ function mergeEnvironment(fileConfig, env) {
     aspectRatio: override("EKKO_IMAGE_GEN_ASPECT_RATIO", fileConfig.aspectRatio),
     resolution: override("EKKO_IMAGE_GEN_RESOLUTION", fileConfig.resolution),
     quality: override("EKKO_IMAGE_GEN_QUALITY", fileConfig.quality),
+    complexity: override("EKKO_IMAGE_GEN_COMPLEXITY", fileConfig.complexity),
     maxConcurrency: override("EKKO_IMAGE_GEN_MAX_CONCURRENCY", fileConfig.maxConcurrency),
     maxGlobalConcurrency: override(
       "EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY",
@@ -276,6 +296,7 @@ export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
     aspectRatio: size.aspectRatio,
     resolution: size.resolution,
     quality,
+    complexity: normalizeComplexity(raw.complexity, "complexity", "invalid_config"),
     maxConcurrency: boundedInteger(
       raw.maxConcurrency,
       DEFAULT_CONFIG.maxConcurrency,
@@ -473,6 +494,34 @@ function normalizeJob(raw, index, config, cwd) {
     });
   }
 
+  const outputFormat = nonEmptyString(raw.outputFormat)?.toLowerCase() ?? null;
+  if (outputFormat !== null && !SUPPORTED_OUTPUT_FORMATS.has(outputFormat)) {
+    throw new ImageGenError(`jobs[${index}].outputFormat must be png, jpeg, webp, gif, or svg`, {
+      code: "invalid_request",
+    });
+  }
+  if (SINGLE_OUTPUT_FORMATS.has(outputFormat) && images.length > 0) {
+    throw new ImageGenError(
+      `jobs[${index}].outputFormat ${outputFormat} is only available for text-to-image; image edits cannot return it`,
+      { code: "invalid_request" },
+    );
+  }
+  const complexity = nonEmptyString(raw.complexity) === null
+    ? config.complexity
+    : normalizeComplexity(raw.complexity, `jobs[${index}].complexity`, "invalid_request");
+  const hasFrameOptions = raw.frameCount !== undefined || raw.frameDurationMs !== undefined;
+  if (hasFrameOptions && outputFormat !== "gif") {
+    throw new ImageGenError(`jobs[${index}].frameCount and frameDurationMs require outputFormat gif`, {
+      code: "invalid_request",
+    });
+  }
+  const frameCount = raw.frameCount === undefined
+    ? null
+    : boundedInteger(raw.frameCount, null, 2, 64, `jobs[${index}].frameCount`);
+  const frameDurationMs = raw.frameDurationMs === undefined
+    ? null
+    : boundedInteger(raw.frameDurationMs, null, 20, 2000, `jobs[${index}].frameDurationMs`);
+
   const historyDisabled = raw.historyDisabled;
   if (historyDisabled !== undefined && typeof historyDisabled !== "boolean") {
     throw new ImageGenError(`jobs[${index}].historyDisabled must be a boolean`, {
@@ -493,6 +542,10 @@ function normalizeJob(raw, index, config, cwd) {
     resolution: size.resolution,
     quality,
     count,
+    outputFormat,
+    complexity,
+    frameCount,
+    frameDurationMs,
     historyDisabled: typeof historyDisabled === "boolean" ? historyDisabled : null,
   };
 }
@@ -601,6 +654,7 @@ function extensionForMime(mime) {
     ["image/png", ".png"],
     ["image/jpeg", ".jpg"],
     ["image/gif", ".gif"],
+    ["image/svg+xml", ".svg"],
     ["image/webp", ".webp"],
     ["image/bmp", ".bmp"],
   ]).get(mime) ?? ".png";
@@ -836,6 +890,14 @@ function shouldFallbackModel(error) {
     return false;
   }
   return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function normalizeComplexity(value, field, code) {
+  const complexity = nonEmptyString(value)?.toLowerCase() ?? null;
+  if (complexity !== null && !SUPPORTED_COMPLEXITIES.has(complexity)) {
+    throw new ImageGenError(field + " must be low, medium, or high", { code });
+  }
+  return complexity;
 }
 
 function optionalBoolean(value, fallback) {
@@ -1174,6 +1236,20 @@ function generationBody(job, model, count) {
     size: job.size,
     quality: job.quality,
   };
+  // Every 2.6 field is sent only when a job sets it, so services that predate
+  // them keep receiving the request shape they already accept.
+  if (job.outputFormat) {
+    body.output_format = job.outputFormat;
+  }
+  if (job.complexity) {
+    body.complexity = job.complexity;
+  }
+  if (job.frameCount) {
+    body.frame_count = job.frameCount;
+  }
+  if (job.frameDurationMs) {
+    body.frame_duration_ms = job.frameDurationMs;
+  }
   if (job.historyDisabled !== null) {
     body.history_disabled = job.historyDisabled;
   }
@@ -1187,6 +1263,12 @@ function editBody(job, inputs, model, count) {
   form.append("n", String(count));
   form.append("size", job.size);
   form.append("quality", job.quality);
+  if (job.outputFormat) {
+    form.append("output_format", job.outputFormat);
+  }
+  if (job.complexity) {
+    form.append("complexity", job.complexity);
+  }
   const imageField = inputs.length > 1 ? "image[]" : "image";
   for (const input of inputs) {
     form.append(imageField, new Blob([input.bytes], { type: input.mime }), input.name);
@@ -1216,15 +1298,40 @@ async function requestImageChunk(job, inputs, mode, model, count, config, fetchI
       );
 }
 
-function validatedResponseImage(bytes, message) {
-  const mime = detectImageMime(bytes);
-  if (!mime) {
-    throw new ImageGenError(message, { code: "invalid_response" });
+function utf8Text(bytes) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
   }
-  return { bytes, mime };
 }
 
-async function responseItemBytes(item, config, fetchImpl) {
+// SVG is text, so it has no magic number. It is accepted only as output and
+// only when the job asked for it; the shared detector, which also screens
+// reference inputs and preview files, deliberately never recognizes it.
+export function detectSvgDocument(bytes) {
+  const text = utf8Text(bytes);
+  return text !== null && SVG_PROLOGUE_PATTERN.test(text.slice(0, 4096)) && SVG_CLOSING_PATTERN.test(text);
+}
+
+function validatedResponseImage(bytes, message, { allowSvg = false } = {}) {
+  const mime = detectImageMime(bytes);
+  if (mime) {
+    return { bytes, mime };
+  }
+  if (allowSvg && detectSvgDocument(bytes)) {
+    if (SVG_ACTIVE_CONTENT_PATTERN.test(utf8Text(bytes))) {
+      throw new ImageGenError(
+        "Image service returned an SVG containing active content (script, event handler, foreignObject, or javascript: URL); refusing to write it",
+        { code: "unsafe_svg" },
+      );
+    }
+    return { bytes, mime: "image/svg+xml" };
+  }
+  throw new ImageGenError(message, { code: "invalid_response" });
+}
+
+async function responseItemBytes(item, config, fetchImpl, { allowSvg = false } = {}) {
   if (nonEmptyString(item?.b64_json)) {
     const raw = item.b64_json.replace(/^data:[^;,]+;base64,/iu, "");
     const bytes = Buffer.from(raw, "base64");
@@ -1236,6 +1343,7 @@ async function responseItemBytes(item, config, fetchImpl) {
     return validatedResponseImage(
       bytes,
       "Image service returned base64 data that is not a supported image",
+      { allowSvg },
     );
   }
   if (nonEmptyString(item?.url)) {
@@ -1259,6 +1367,7 @@ async function responseItemBytes(item, config, fetchImpl) {
         return validatedResponseImage(
           bytes,
           "Generated image URL returned data that is not a supported image",
+          { allowSvg },
         );
       },
     );
@@ -1307,7 +1416,9 @@ async function persistResponse(
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     try {
-      const resolved = await responseItemBytes(item, config, fetchImpl);
+      const resolved = await responseItemBytes(item, config, fetchImpl, {
+        allowSvg: job.outputFormat === "svg",
+      });
       const dimensions = imageDimensions(resolved.bytes, resolved.mime);
       const filePath = await writeUniqueFile(
         job.outputDir,
@@ -1334,6 +1445,12 @@ async function persistResponse(
         sizeMatched: dimensions.width === null || dimensions.height === null
           ? null
           : dimensions.width === requested.width && dimensions.height === requested.height,
+        // A service may accept output_format and still return something else;
+        // report what arrived rather than what was asked for.
+        format: resolved.mime,
+        formatMatched: job.outputFormat
+          ? resolved.mime === OUTPUT_FORMAT_MIME.get(job.outputFormat)
+          : null,
       });
     } catch (error) {
       throw new ImageGenError(error.message, {
@@ -1381,6 +1498,11 @@ function buildJobResult(
       .map((file) =>
         `Requested ${file.requestedWidth}x${file.requestedHeight}, but the service returned ${file.width}x${file.height}`,
       ),
+    ...files
+      .filter((file) => file.formatMatched === false)
+      .map((file) =>
+        `Requested ${job.outputFormat} output, but the service returned ${file.format}`,
+      ),
   ];
   const result = {
     id: job.id,
@@ -1394,6 +1516,8 @@ function buildJobResult(
     aspectRatio: job.aspectRatio,
     resolution: job.resolution,
     quality: job.quality,
+    outputFormat: job.outputFormat,
+    complexity: job.complexity,
     inputCount,
     requestedCount: job.count,
     returnedCount: files.length,
@@ -1435,7 +1559,9 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
   job = { ...job, models: orderedModels };
   const requestCounts = splitRequestCounts(
     job.count,
-    runtime.multiImageCap ?? config.maxImagesPerRequest,
+    SINGLE_OUTPUT_FORMATS.has(job.outputFormat)
+      ? 1
+      : runtime.multiImageCap ?? config.maxImagesPerRequest,
   );
   const modelAttempts = [];
   const files = [];
@@ -1799,7 +1925,7 @@ export async function setConfiguredModels(models, options = {}) {
 }
 
 function helpText() {
-  return `Usage: node image-gen.mjs [--request FILE | --list-models | --set-models LIST]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR, EKKO_IMAGE_GEN_MODEL_DISCOVERY.\n`;
+  return `Usage: node image-gen.mjs [--request FILE | --list-models | --set-models LIST]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR, EKKO_IMAGE_GEN_MODEL_DISCOVERY,\nEKKO_IMAGE_GEN_COMPLEXITY.\n`;
 }
 
 async function readStdin() {
