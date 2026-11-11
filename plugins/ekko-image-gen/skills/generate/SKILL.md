@@ -106,14 +106,10 @@ Supported UI-derived presets are documented in `references/request-schema.md`. P
 
 Leave `outputFormat` and `complexity` unset unless the asset calls for them; unset, the request keeps the shape every service accepts.
 
-| Need | Setting |
-|---|---|
-| Logo, icon, or illustration that must scale cleanly | `outputFormat: "svg"` |
-| Short loop, sticker, or simple motion | `outputFormat: "gif"`, with `frameCount` and `frameDurationMs` when timing matters |
-| Bulk drafts or quick exploration where latency matters more than layout care | `complexity: "low"` |
-| Dense composition, many elements, or precise layout | leave `complexity` unset or `"high"` |
+- Set `outputFormat` to `jpeg` or `webp` only when the consuming project needs that format. Check each file's `format` and `formatMatched` and tell the user when the requested format did not arrive.
+- Set `complexity: "low"` for bulk drafts or quick exploration where latency matters more than layout care, on services that support it. Leave it unset for dense or precise compositions.
 
-SVG and GIF exist only for text-to-image; do not request them for an edit with reference images. Support varies by service: a service may refuse GIF outright, or accept an SVG request and return a raster image. Check each file's `format` and `formatMatched` and tell the user plainly when the requested format did not arrive, instead of describing a PNG as a vector.
+This plugin does not produce SVG or animated GIF. When the user needs a vector asset, say so, and offer to write simple SVG markup directly instead of generating a raster image and calling it a vector.
 
 ## Choose direct or multi-agent execution
 
@@ -149,7 +145,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 ## Inspect and accept results
 
 1. Collect every successful local path, including partial successes.
-2. Call `Read` on each generated image so a capable Claude Code UI can render it and so the parent agent can inspect the actual pixels. An SVG reads as markup rather than a picture: review its structure, `viewBox`, and shapes, and say that it was checked as markup, not viewed. A GIF may show a single frame; say so rather than claiming the animation was reviewed.
+2. Call `Read` on each generated image so a capable Claude Code UI can render it and so the parent agent can inspect the actual pixels.
 3. Compare each image with its job criteria and compare related assets with the shared direction.
 4. Check subject, composition, dimensions, background intent, legibility, unwanted text, obvious artifacts, identity preservation, and consistency with neighboring assets.
 5. Compare `requestedCount` with `returnedCount`, surface count-shortfall warnings, and preserve every file from a `partial` job.
@@ -159,7 +155,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 
 ## Create clickable preview links
 
-Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin. Leave SVG files out: the helper deliberately does not serve them, so return their absolute paths only.
+Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/preview-image.mjs" <<'EKKO_IMAGE_PREVIEW'

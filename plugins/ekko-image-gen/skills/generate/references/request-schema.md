@@ -121,10 +121,8 @@ A single job object without `jobs` is accepted as shorthand.
 | `aspectRatio` | no | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, or `auto`. |
 | `resolution` | no | `1k`, `2k`, `4k`, or `auto`; only combinations exposed by the service UI are accepted. |
 | `quality` | no | `auto`, `low`, `medium`, `high`, `xhigh`, or `max`. `xhigh` and `max` are GPT Image 2.5 tiers; services that predate them reject the value upstream. |
-| `outputFormat` | no | `png`, `jpeg`, `webp`, `gif`, or `svg`, sent as `output_format` only when set. `gif` and `svg` are GPT Image 2.6 formats: text-to-image only, and requested one document per upstream call while the logical `count` still splits normally. |
-| `complexity` | no | `low`, `medium`, or `high`: how much the model plans before rendering. Sent only when set on the job or in the configuration; GPT Image 2.6 services default to `high` when it is omitted. |
-| `frameCount` | no | Animated GIF frames, `2-64`. Requires `outputFormat: "gif"`. |
-| `frameDurationMs` | no | Per-frame duration in milliseconds, `20-2000`. Requires `outputFormat: "gif"`. |
+| `outputFormat` | no | `png`, `jpeg`, or `webp`, sent as `output_format` only when set. |
+| `complexity` | no | `low`, `medium`, or `high`: how much the model plans before rendering. Sent only when set on the job or in the configuration; GPT Image 2.6 services default to `high` when it is omitted, and services without it may reject the field. |
 | `count` / `n` | no | Logical images requested for this job, `1-4`; the runner may split them across upstream requests. |
 | `historyDisabled` | no | Provider-specific generation extension. When omitted, the runner does not send `history_disabled`; set a boolean only for services that document support. |
 
@@ -150,9 +148,9 @@ The runner validates uploaded bytes as PNG, JPEG, GIF, WebP, or BMP and refuses 
 
 The API may accept a requested tier while returning different actual pixel dimensions. Some gateways ignore `size` completely, returning their own fixed dimensions and orientation no matter which preset or exact `WIDTHxHEIGHT` value is sent; on those services a portrait request can come back as a landscape image, and the only way to steer composition is the prompt. Read `width`, `height`, `requestedWidth`, `requestedHeight`, and `sizeMatched` from every saved file instead of assuming the upstream honored the exact dimensions.
 
-The same holds for `outputFormat`. A gateway may accept `output_format` and still return a different format; one tested gateway answers an SVG request with a PNG and echoes `output_format: png`. Every saved file reports `format`, the MIME type detected from its bytes, and `formatMatched`, which is `null` when no format was requested. The file extension always follows the detected bytes, never the request, so an SVG request answered with a PNG is saved as `.png` with a warning.
+The same holds for `outputFormat`: a gateway may accept `output_format` and still return a different format. Every saved file reports `format`, the MIME type detected from its bytes, and `formatMatched`, which is `null` when no format was requested. The file extension always follows the detected bytes, never the request, so a mismatch is saved under its real extension with a warning.
 
-SVG is accepted only as output and only when the job requested it; reference inputs and the preview helper never accept it. Because an SVG asset can carry script into a web project, a returned SVG containing a `script` or `foreignObject` element, an inline event handler, or a `javascript:` URL is refused with `unsafe_svg` and nothing is written.
+SVG and animated GIF output are intentionally not supported. Only GPT Image 2.6 offers them, tested gateways refuse or silently downgrade them, and other providers do not offer them at all.
 
 ## API routing
 

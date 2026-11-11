@@ -49,7 +49,7 @@
 
 `quality` 可用 `auto / low / medium / high / xhigh / max`。`xhigh` 与 `max` 由 GPT Image 2.5 引入，早于 2.5 的服务会直接拒绝这两个值。
 
-GPT Image 2.6 新增三个可选项，都只在你明确要求时才发送：`outputFormat: "svg"` 生成可无损缩放的矢量图，`outputFormat: "gif"` 生成动图（可配 `frameCount` 2–64 与 `frameDurationMs` 20–2000），`complexity` 用 `low / medium / high` 控制模型出图前的规划程度。SVG 与 GIF 只支持文生图。各服务支持程度不一：有的会直接拒绝 GIF，有的会接受 SVG 请求却返回 PNG。结果里的 `format` 与 `formatMatched` 反映实际收到的格式，文件扩展名也按实际字节决定。
+两个可选项只在你明确要求时才发送：`outputFormat` 可选 `png / jpeg / webp`，`complexity` 用 `low / medium / high` 控制 GPT Image 2.6 出图前的规划程度。结果里的 `format` 与 `formatMatched` 反映实际收到的格式，文件扩展名也按实际字节决定。插件不支持 SVG 和 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，换成其他服务商更不可能有。
 
 ## 示例
 
@@ -142,9 +142,7 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 - `unknown_parameter` 且消息指向 `n`：服务不接受单次多图，常见于把 Images API 转译成 Responses API `image_generation` 工具的网关。runner 会自动改用单图重发并记录告警；若仍失败，显式设置 `maxImagesPerRequest: 1`。
 - `model_not_found` 或提示模型在当前分组不可用：确认该 API Key 所属分组已开通图像模型。runner 会沿配置链尝试下一个模型，全部失败才报错，错误详情中的 `modelAttempts` 会列出每个模型的实际状态。
 - `quality must be auto, low, medium, high, xhigh, or max`：传入了不支持的画质值；`xhigh` 与 `max` 需要服务端支持 GPT Image 2.5。
-- 请求了 SVG 却拿到 `.png`，并出现 `Requested svg output, but the service returned image/png`：服务接受了参数但没有执行，这是服务端行为，不是插件出错。
-- `GIF output is not enabled for this request.`：该服务或账户没有开通 GIF 输出。这是账户层面的限制，runner 不会为此切换模型。
-- `unsafe_svg`：服务返回的 SVG 带有脚本或事件处理器等可执行内容，为避免把可执行代码写进项目素材，该文件被拒绝写入。
+- 出现 `Requested webp output, but the service returned image/png` 这类告警：服务接受了 `outputFormat` 但没有执行，这是服务端行为，文件已按实际格式保存。
 - 点击预览链接无响应：确认终端允许 Ctrl/Cmd+点击普通 HTTP URL，并检查链接是否已超过 15 分钟；过期后可要求重新创建预览链接。
 - `preview_start_failed`：临时 loopback 服务未能启动；图片仍已成功生成，请使用绝对路径。
 - SSH / 容器 / 远程开发：`127.0.0.1` 可能指向 Claude Code 所在主机而不是浏览器所在主机；使用端口转发或绝对路径。

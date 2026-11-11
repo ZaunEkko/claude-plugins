@@ -7,7 +7,6 @@ import test from "node:test";
 
 import {
   declaredImageModels,
-  detectSvgDocument,
   imageDimensions,
   loadConfig,
   normalizeBaseUrl,
@@ -1463,14 +1462,6 @@ test("reuses a remembered model and reports the catalog through listModels", asy
   assert.deepEqual(catalog.models.map((entry) => entry.id), ["house-image-a", "house-image-b"]);
 });
 
-const SAFE_SVG = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="red"/></svg>\n';
-const GIF_BASE64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-
-function documentResponse(response, base64) {
-  response.writeHead(200, { "Content-Type": "application/json" });
-  response.end(JSON.stringify({ created: 1, data: [{ b64_json: base64 }] }));
-}
-
 async function outputFiles(directory) {
   try {
     return (await fs.readdir(directory)).sort();
@@ -1494,7 +1485,7 @@ test("sends GPT Image 2.6 fields only when a job or the config sets them", async
   });
   // A job that sets none of the new fields keeps the request shape older
   // services already accept.
-  for (const key of ["output_format", "complexity", "frame_count", "frame_duration_ms"]) {
+  for (const key of ["output_format", "complexity"]) {
     assert.equal(key in bodies[0], false, key + " must not be sent by default");
   }
 
@@ -1514,37 +1505,6 @@ test("sends GPT Image 2.6 fields only when a job or the config sets them", async
   assert.equal(bodies[2].output_format, "png");
 });
 
-test("saves requested SVG output one document per request", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const bodies = [];
-  const baseUrl = await startServer(t, async (request, response) => {
-    bodies.push(JSON.parse((await readBody(request)).toString("utf8")));
-    documentResponse(response, Buffer.from(SAFE_SVG, "utf8").toString("base64"));
-  });
-
-  const result = await runJobs({
-    id: "vector",
-    prompt: "A red circle",
-    outputDir: path.join(directory, "output"),
-    outputName: "circle",
-    outputFormat: "svg",
-    count: 2,
-  }, { cwd: directory, config: config(baseUrl, path.join(directory, "runtime")) });
-
-  const job = result.jobs[0];
-  assert.equal(result.status, "ok");
-  assert.deepEqual(bodies.map((body) => [body.n, body.output_format]), [[1, "svg"], [1, "svg"]]);
-  assert.deepEqual(await outputFiles(path.join(directory, "output")), ["circle-1.svg", "circle-2.svg"]);
-  assert.ok(job.files.every((file) => file.format === "image/svg+xml" && file.formatMatched === true));
-  assert.ok(job.files.every((file) => file.sizeMatched === null));
-  assert.equal(job.outputFormat, "svg");
-  assert.equal(job.warnings.some((warning) => warning.includes("output, but the service returned")), false);
-  assert.equal(
-    await fs.readFile(path.join(directory, "output", "circle-1.svg"), "utf8"),
-    SAFE_SVG,
-  );
-});
-
 test("reports a format mismatch when a service ignores output_format", async (t) => {
   const directory = await temporaryDirectory(t);
   const baseUrl = await startServer(t, async (request, response) => {
@@ -1557,7 +1517,7 @@ test("reports a format mismatch when a service ignores output_format", async (t)
     prompt: "A red circle",
     outputDir: path.join(directory, "output"),
     outputName: "circle",
-    outputFormat: "svg",
+    outputFormat: "webp",
   }, { cwd: directory, config: config(baseUrl, path.join(directory, "runtime")) });
 
   const job = result.jobs[0];
@@ -1566,99 +1526,17 @@ test("reports a format mismatch when a service ignores output_format", async (t)
   assert.deepEqual(await outputFiles(path.join(directory, "output")), ["circle.png"]);
   assert.equal(job.files[0].format, "image/png");
   assert.equal(job.files[0].formatMatched, false);
-  assert.ok(job.warnings.includes("Requested svg output, but the service returned image/png"));
+  assert.ok(job.warnings.includes("Requested webp output, but the service returned image/png"));
 });
 
-test("refuses SVG with active content, and SVG that nobody asked for", async (t) => {
-  const directory = await temporaryDirectory(t);
-  let payload = "";
-  const baseUrl = await startServer(t, async (request, response) => {
-    await readBody(request);
-    documentResponse(response, Buffer.from(payload, "utf8").toString("base64"));
-  });
-  const runtimeDir = path.join(directory, "runtime");
-
-  payload = '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><circle r="4"/></svg>';
-  const unsafe = await runJobs({
-    id: "unsafe", prompt: "A", outputDir: path.join(directory, "unsafe"), outputFormat: "svg",
-  }, { cwd: directory, config: config(baseUrl, runtimeDir) });
-  assert.equal(unsafe.jobs[0].status, "error");
-  assert.equal(unsafe.jobs[0].error.code, "unsafe_svg");
-  assert.deepEqual(await outputFiles(path.join(directory, "unsafe")), []);
-
-  payload = SAFE_SVG;
-  const unrequested = await runJobs({
-    id: "unrequested", prompt: "B", outputDir: path.join(directory, "unrequested"),
-  }, { cwd: directory, config: config(baseUrl, runtimeDir) });
-  assert.equal(unrequested.jobs[0].status, "error");
-  assert.equal(unrequested.jobs[0].error.code, "invalid_response");
-  assert.deepEqual(await outputFiles(path.join(directory, "unrequested")), []);
-});
-
-test("requests animated GIF frames and rejects invalid 2.6 combinations", async (t) => {
-  const directory = await temporaryDirectory(t);
-  const bodies = [];
-  const baseUrl = await startServer(t, async (request, response) => {
-    bodies.push(JSON.parse((await readBody(request)).toString("utf8")));
-    documentResponse(response, GIF_BASE64);
-  });
-  const settings = config(baseUrl, path.join(directory, "runtime"));
-
-  const result = await runJobs({
-    id: "loop",
-    prompt: "A bouncing ball",
-    outputDir: path.join(directory, "output"),
-    outputName: "ball",
-    outputFormat: "gif",
-    frameCount: 4,
-    frameDurationMs: 150,
-    count: 2,
-  }, { cwd: directory, config: settings });
-  assert.equal(result.status, "ok");
-  assert.deepEqual(
-    bodies.map((body) => [body.n, body.output_format, body.frame_count, body.frame_duration_ms]),
-    [[1, "gif", 4, 150], [1, "gif", 4, 150]],
-  );
-  assert.deepEqual(await outputFiles(path.join(directory, "output")), ["ball-1.gif", "ball-2.gif"]);
-  assert.ok(result.jobs[0].files.every((file) => file.formatMatched === true));
-
+test("rejects unsupported output formats and complexity values", () => {
+  const settings = config("http://localhost:3050/v1", path.resolve("runtime"));
   const reject = (job, pattern) => assert.throws(
-    () => normalizeRequest({ id: "x", prompt: "x", ...job }, settings, { cwd: directory }),
+    () => normalizeRequest({ id: "x", prompt: "x", ...job }, settings, { cwd: path.resolve("project") }),
     pattern,
   );
-  reject({ outputFormat: "svg", images: ["reference.png"] }, /only available for text-to-image/u);
-  reject({ outputFormat: "gif", images: ["reference.png"] }, /only available for text-to-image/u);
-  reject({ frameCount: 4 }, /require outputFormat gif/u);
-  reject({ outputFormat: "svg", frameDurationMs: 100 }, /require outputFormat gif/u);
-  reject({ outputFormat: "gif", frameCount: 1 }, /frameCount must be an integer from 2 to 64/u);
-  reject({ outputFormat: "gif", frameDurationMs: 5000 }, /frameDurationMs must be an integer from 20 to 2000/u);
-  reject({ outputFormat: "tiff" }, /outputFormat must be png, jpeg, webp, gif, or svg/u);
+  for (const outputFormat of ["svg", "gif", "tiff"]) {
+    reject({ outputFormat }, /outputFormat must be png, jpeg, or webp/u);
+  }
   reject({ complexity: "extreme" }, /complexity must be low, medium, or high/u);
-});
-
-test("detects SVG documents in linear time", () => {
-  const accept = [
-    '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
-    '\uFEFF  <?xml version="1.0"?>\n<!-- a -->\n<!DOCTYPE svg>\n<!-- b --><svg>\n</svg>\n',
-    '<SVG viewBox="0 0 1 1"></SVG>',
-  ];
-  const reject = [
-    '<html><svg></svg></html>',
-    '<svgx></svgx>',
-    '<svg viewBox="0 0 1 1"><circle',
-    '<!-- never closed <svg></svg>',
-  ];
-  for (const text of accept) {
-    assert.equal(detectSvgDocument(Buffer.from(text, "utf8")), true, text);
-  }
-  for (const text of reject) {
-    assert.equal(detectSvgDocument(Buffer.from(text, "utf8")), false, text);
-  }
-
-  // The input CodeQL flagged: exponential for a backtracking pattern, linear here.
-  const hostile = Buffer.from("<!--" + "--><!--".repeat(200000), "utf8");
-  const started = process.hrtime.bigint();
-  assert.equal(detectSvgDocument(hostile), false);
-  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
-  assert.ok(elapsedMs < 1000, "took " + elapsedMs + " ms");
 });

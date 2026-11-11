@@ -6,15 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Added GPT Image 2.6 request fields to `ekko-image-gen`: `outputFormat` (`png`, `jpeg`, `webp`, `gif`, `svg`) sent as `output_format`, `complexity` (`low`, `medium`, `high`) on the job or in the configuration, and GIF `frameCount` and `frameDurationMs`. Each is sent only when set, so a request without them keeps the shape older services accept.
-- Added per-file `format` and `formatMatched` reporting with a warning when the returned format differs from the requested one. File extensions follow the detected bytes rather than the request, so a gateway that answers an SVG request with a PNG yields a correctly named `.png` instead of a mislabeled `.svg`.
-- Added SVG output acceptance that is scoped to jobs requesting SVG, leaving reference-input and preview detection unchanged, and refuses SVG carrying `script` or `foreignObject` elements, inline event handlers, or `javascript:` URLs with `unsafe_svg`.
-- Added local validation of 2.6 combinations: SVG and GIF only for text-to-image, frame options only with GIF, and bounded frame values. SVG and GIF are requested one document per upstream call while the logical `count` still splits normally.
-- Added isolated tests for default request shape, configuration and job complexity, SVG saving and splitting, format mismatch reporting, unsafe and unrequested SVG refusal, GIF frame requests, and invalid combinations.
+- Added an optional `outputFormat` (`png`, `jpeg`, `webp`) sent as `output_format`, and the GPT Image 2.6 `complexity` setting (`low`, `medium`, `high`) on the job or in the configuration. Each is sent only when set, so a request without them keeps the shape older services accept.
+- Added per-file `format` and `formatMatched` reporting with a warning when the returned format differs from the requested one. File extensions follow the detected bytes rather than the request.
+- Added isolated tests for the default request shape, configuration and job complexity, format mismatch reporting, and rejected values.
 
 ### Changed
 
-- Bumped `ekko-image-gen` to `0.1.17`, and taught the generate skill when to request vector, animated, or low-complexity output, how to review SVG and GIF honestly, and to keep SVG out of preview links.
+- Bumped `ekko-image-gen` to `0.1.17`, and taught the generate skill when to set an output format or low complexity.
+
+### Not supported
+
+- SVG and animated GIF output are intentionally left out. Only GPT Image 2.6 offers them; the tested gateway refuses GIF and silently returns PNG for SVG, and other providers do not offer either. Accepting SVG would also have required screening returned markup for script before writing it into a project.
 
 ## 2.4.0 - 2026-11-09
 

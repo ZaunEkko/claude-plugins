@@ -77,18 +77,8 @@ const OUTPUT_FORMAT_MIME = new Map([
   ["png", "image/png"],
   ["jpeg", "image/jpeg"],
   ["webp", "image/webp"],
-  ["gif", "image/gif"],
-  ["svg", "image/svg+xml"],
 ]);
 const SUPPORTED_OUTPUT_FORMATS = new Set(OUTPUT_FORMAT_MIME.keys());
-// Animated and vector output: one document per request, text-to-image only.
-const SINGLE_OUTPUT_FORMATS = new Set(["gif", "svg"]);
-const SVG_PROLOGUE_MAX_ITEMS = 64;
-// Content that turns a picture into a program. A generated illustration never
-// needs any of it, and an SVG asset dropped into a web project with it is a
-// stored script.
-const SVG_ACTIVE_CONTENT_PATTERN =
-  /<script[\s>\/]|<foreignObject[\s>\/]|\son[a-z]+\s*=|(?:href|src)\s*=\s*["']?\s*javascript:/iu;
 const MULTI_IMAGE_REJECTION_STATUSES = new Set([400, 422]);
 const MULTI_IMAGE_REJECTION_PARAM_PATTERN = /(?:^|\.)n$/u;
 const MULTI_IMAGE_REJECTION_MESSAGE_PATTERN =
@@ -494,31 +484,13 @@ function normalizeJob(raw, index, config, cwd) {
 
   const outputFormat = nonEmptyString(raw.outputFormat)?.toLowerCase() ?? null;
   if (outputFormat !== null && !SUPPORTED_OUTPUT_FORMATS.has(outputFormat)) {
-    throw new ImageGenError(`jobs[${index}].outputFormat must be png, jpeg, webp, gif, or svg`, {
+    throw new ImageGenError(`jobs[${index}].outputFormat must be png, jpeg, or webp`, {
       code: "invalid_request",
     });
-  }
-  if (SINGLE_OUTPUT_FORMATS.has(outputFormat) && images.length > 0) {
-    throw new ImageGenError(
-      `jobs[${index}].outputFormat ${outputFormat} is only available for text-to-image; image edits cannot return it`,
-      { code: "invalid_request" },
-    );
   }
   const complexity = nonEmptyString(raw.complexity) === null
     ? config.complexity
     : normalizeComplexity(raw.complexity, `jobs[${index}].complexity`, "invalid_request");
-  const hasFrameOptions = raw.frameCount !== undefined || raw.frameDurationMs !== undefined;
-  if (hasFrameOptions && outputFormat !== "gif") {
-    throw new ImageGenError(`jobs[${index}].frameCount and frameDurationMs require outputFormat gif`, {
-      code: "invalid_request",
-    });
-  }
-  const frameCount = raw.frameCount === undefined
-    ? null
-    : boundedInteger(raw.frameCount, null, 2, 64, `jobs[${index}].frameCount`);
-  const frameDurationMs = raw.frameDurationMs === undefined
-    ? null
-    : boundedInteger(raw.frameDurationMs, null, 20, 2000, `jobs[${index}].frameDurationMs`);
 
   const historyDisabled = raw.historyDisabled;
   if (historyDisabled !== undefined && typeof historyDisabled !== "boolean") {
@@ -542,8 +514,6 @@ function normalizeJob(raw, index, config, cwd) {
     count,
     outputFormat,
     complexity,
-    frameCount,
-    frameDurationMs,
     historyDisabled: typeof historyDisabled === "boolean" ? historyDisabled : null,
   };
 }
@@ -652,7 +622,6 @@ function extensionForMime(mime) {
     ["image/png", ".png"],
     ["image/jpeg", ".jpg"],
     ["image/gif", ".gif"],
-    ["image/svg+xml", ".svg"],
     ["image/webp", ".webp"],
     ["image/bmp", ".bmp"],
   ]).get(mime) ?? ".png";
@@ -1234,20 +1203,15 @@ function generationBody(job, model, count) {
     size: job.size,
     quality: job.quality,
   };
-  // Every 2.6 field is sent only when a job sets it, so services that predate
-  // them keep receiving the request shape they already accept.
+  // Optional fields are sent only when set, so services that predate them
+  // keep receiving the request shape they already accept.
   if (job.outputFormat) {
     body.output_format = job.outputFormat;
   }
   if (job.complexity) {
     body.complexity = job.complexity;
   }
-  if (job.frameCount) {
-    body.frame_count = job.frameCount;
-  }
-  if (job.frameDurationMs) {
-    body.frame_duration_ms = job.frameDurationMs;
-  }
+
   if (job.historyDisabled !== null) {
     body.history_disabled = job.historyDisabled;
   }
@@ -1296,88 +1260,15 @@ async function requestImageChunk(job, inputs, mode, model, count, config, fetchI
       );
 }
 
-function utf8Text(bytes) {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return null;
-  }
-}
-
-// SVG is text, so it has no magic number. It is accepted only as output and
-// only when the job asked for it; the shared detector, which also screens
-// reference inputs and preview files, deliberately never recognizes it.
-// Linear scan: each step advances with indexOf, so no input can make it
-// backtrack. Accepts an optional BOM, XML declaration, comments and a
-// doctype in front of the root <svg> element.
-function startsWithSvgRoot(text) {
-  let index = text.charCodeAt(0) === 0xfeff ? 1 : 0;
-  const skipWhitespace = () => {
-    while (index < text.length && " \t\r\n".includes(text[index])) {
-      index += 1;
-    }
-  };
-  const startsWithAt = (token) =>
-    text.slice(index, index + token.length).toLowerCase() === token;
-  skipWhitespace();
-  if (startsWithAt("<?xml")) {
-    const end = text.indexOf("?>", index);
-    if (end < 0) {
-      return false;
-    }
-    index = end + 2;
-    skipWhitespace();
-  }
-  for (let item = 0; item < SVG_PROLOGUE_MAX_ITEMS; item += 1) {
-    if (startsWithAt("<!--")) {
-      const end = text.indexOf("-->", index + 4);
-      if (end < 0) {
-        return false;
-      }
-      index = end + 3;
-    } else if (startsWithAt("<!doctype")) {
-      const end = text.indexOf(">", index);
-      if (end < 0) {
-        return false;
-      }
-      index = end + 1;
-    } else {
-      break;
-    }
-    skipWhitespace();
-  }
-  if (!startsWithAt("<svg")) {
-    return false;
-  }
-  const next = text[index + 4];
-  return next === ">" || (next !== undefined && " \t\r\n".includes(next));
-}
-
-export function detectSvgDocument(bytes) {
-  const text = utf8Text(bytes);
-  return text !== null
-    && startsWithSvgRoot(text)
-    && text.trimEnd().toLowerCase().endsWith("</svg>");
-}
-
-function validatedResponseImage(bytes, message, { allowSvg = false } = {}) {
+function validatedResponseImage(bytes, message) {
   const mime = detectImageMime(bytes);
-  if (mime) {
-    return { bytes, mime };
+  if (!mime) {
+    throw new ImageGenError(message, { code: "invalid_response" });
   }
-  if (allowSvg && detectSvgDocument(bytes)) {
-    if (SVG_ACTIVE_CONTENT_PATTERN.test(utf8Text(bytes))) {
-      throw new ImageGenError(
-        "Image service returned an SVG containing active content (script, event handler, foreignObject, or javascript: URL); refusing to write it",
-        { code: "unsafe_svg" },
-      );
-    }
-    return { bytes, mime: "image/svg+xml" };
-  }
-  throw new ImageGenError(message, { code: "invalid_response" });
+  return { bytes, mime };
 }
 
-async function responseItemBytes(item, config, fetchImpl, { allowSvg = false } = {}) {
+async function responseItemBytes(item, config, fetchImpl) {
   if (nonEmptyString(item?.b64_json)) {
     const raw = item.b64_json.replace(/^data:[^;,]+;base64,/iu, "");
     const bytes = Buffer.from(raw, "base64");
@@ -1389,7 +1280,6 @@ async function responseItemBytes(item, config, fetchImpl, { allowSvg = false } =
     return validatedResponseImage(
       bytes,
       "Image service returned base64 data that is not a supported image",
-      { allowSvg },
     );
   }
   if (nonEmptyString(item?.url)) {
@@ -1413,7 +1303,6 @@ async function responseItemBytes(item, config, fetchImpl, { allowSvg = false } =
         return validatedResponseImage(
           bytes,
           "Generated image URL returned data that is not a supported image",
-          { allowSvg },
         );
       },
     );
@@ -1462,9 +1351,7 @@ async function persistResponse(
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     try {
-      const resolved = await responseItemBytes(item, config, fetchImpl, {
-        allowSvg: job.outputFormat === "svg",
-      });
+      const resolved = await responseItemBytes(item, config, fetchImpl);
       const dimensions = imageDimensions(resolved.bytes, resolved.mime);
       const filePath = await writeUniqueFile(
         job.outputDir,
@@ -1605,9 +1492,7 @@ async function runJob(job, config, fetchImpl, cwd, runtime = {}) {
   job = { ...job, models: orderedModels };
   const requestCounts = splitRequestCounts(
     job.count,
-    SINGLE_OUTPUT_FORMATS.has(job.outputFormat)
-      ? 1
-      : runtime.multiImageCap ?? config.maxImagesPerRequest,
+    runtime.multiImageCap ?? config.maxImagesPerRequest,
   );
   const modelAttempts = [];
   const files = [];
