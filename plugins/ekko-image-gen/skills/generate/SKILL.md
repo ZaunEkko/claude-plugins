@@ -3,7 +3,7 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", "打开刚才生成的图片", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns absolute paths plus temporary loopback HTTP preview links that terminal users can Ctrl/Cmd+click without an automatic GUI launch.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.16
+version: 0.1.17
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -102,6 +102,15 @@ Choose aspect ratio and resolution from the consuming context:
 
 Supported UI-derived presets are documented in `references/request-schema.md`. Prefer a preset over manually approximating its dimensions. Treat 4K as a requested generation tier, not a guarantee that the upstream model returns exactly 3840×2160 or 2160×3840. Inspect the runner's actual `width`, `height`, and `sizeMatched` fields and report any mismatch.
 
+### Choose output format and complexity
+
+Leave `outputFormat` and `complexity` unset unless the asset calls for them; unset, the request keeps the shape every service accepts.
+
+- Set `outputFormat` to `jpeg` or `webp` only when the consuming project needs that format. Check each file's `format` and `formatMatched` and tell the user when the requested format did not arrive.
+- Set `complexity: "low"` for bulk drafts or quick exploration where latency matters more than layout care, on services that support it. Leave it unset for dense or precise compositions.
+
+This plugin does not produce SVG or animated GIF. When the user needs a vector asset, say so, and offer to write simple SVG markup directly instead of generating a raster image and calling it a vector.
+
 ## Choose direct or multi-agent execution
 
 ### One simple job
@@ -146,7 +155,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 
 ## Create clickable preview links
 
-Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin:
+Only the parent agent creates user-facing preview links. After final acceptance, pass all accepted local image paths, up to four, to the bundled helper through stdin.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/preview-image.mjs" <<'EKKO_IMAGE_PREVIEW'

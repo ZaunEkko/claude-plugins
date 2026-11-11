@@ -147,7 +147,7 @@ test("documents temporary loopback previews without automatic GUI launch", async
   const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
   const combinedGuidance = [skill, worker, placement, readme, ...publicDocs].join("\n");
 
-  assert.equal(manifest.version, "0.1.16");
+  assert.equal(manifest.version, "0.1.17");
   assert.match(manifest.description, /temporary loopback HTTP preview links/u);
   assert.ok(marketplaceEntry);
   assert.match(marketplaceEntry.description, /temporary loopback HTTP preview links/u);
@@ -1460,4 +1460,83 @@ test("reuses a remembered model and reports the catalog through listModels", asy
   assert.equal(catalog.declaresModality, true);
   assert.equal(catalog.modelOrigin, "remembered");
   assert.deepEqual(catalog.models.map((entry) => entry.id), ["house-image-a", "house-image-b"]);
+});
+
+async function outputFiles(directory) {
+  try {
+    return (await fs.readdir(directory)).sort();
+  } catch {
+    return [];
+  }
+}
+
+test("sends GPT Image 2.6 fields only when a job or the config sets them", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const bodies = [];
+  const baseUrl = await startServer(t, async (request, response) => {
+    bodies.push(JSON.parse((await readBody(request)).toString("utf8")));
+    successResponse(response);
+  });
+  const runtimeDir = path.join(directory, "runtime");
+
+  await runJobs({ id: "plain", prompt: "A", outputDir: path.join(directory, "a") }, {
+    cwd: directory,
+    config: config(baseUrl, runtimeDir),
+  });
+  // A job that sets none of the new fields keeps the request shape older
+  // services already accept.
+  for (const key of ["output_format", "complexity"]) {
+    assert.equal(key in bodies[0], false, key + " must not be sent by default");
+  }
+
+  await runJobs({
+    concurrency: 1,
+    jobs: [
+      { id: "inherits", prompt: "B", outputDir: path.join(directory, "b") },
+      { id: "overrides", prompt: "C", outputDir: path.join(directory, "c"), complexity: "LOW", outputFormat: "png" },
+    ],
+  }, {
+    cwd: directory,
+    config: config(baseUrl, runtimeDir, { complexity: "medium" }),
+  });
+  assert.equal(bodies[1].complexity, "medium");
+  assert.equal("output_format" in bodies[1], false);
+  assert.equal(bodies[2].complexity, "low");
+  assert.equal(bodies[2].output_format, "png");
+});
+
+test("reports a format mismatch when a service ignores output_format", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const baseUrl = await startServer(t, async (request, response) => {
+    await readBody(request);
+    successResponse(response);
+  });
+
+  const result = await runJobs({
+    id: "downgraded",
+    prompt: "A red circle",
+    outputDir: path.join(directory, "output"),
+    outputName: "circle",
+    outputFormat: "webp",
+  }, { cwd: directory, config: config(baseUrl, path.join(directory, "runtime")) });
+
+  const job = result.jobs[0];
+  assert.equal(result.status, "ok");
+  // Named by the bytes that arrived, never by the format that was requested.
+  assert.deepEqual(await outputFiles(path.join(directory, "output")), ["circle.png"]);
+  assert.equal(job.files[0].format, "image/png");
+  assert.equal(job.files[0].formatMatched, false);
+  assert.ok(job.warnings.includes("Requested webp output, but the service returned image/png"));
+});
+
+test("rejects unsupported output formats and complexity values", () => {
+  const settings = config("http://localhost:3050/v1", path.resolve("runtime"));
+  const reject = (job, pattern) => assert.throws(
+    () => normalizeRequest({ id: "x", prompt: "x", ...job }, settings, { cwd: path.resolve("project") }),
+    pattern,
+  );
+  for (const outputFormat of ["svg", "gif", "tiff"]) {
+    reject({ outputFormat }, /outputFormat must be png, jpeg, or webp/u);
+  }
+  reject({ complexity: "extreme" }, /complexity must be low, medium, or high/u);
 });

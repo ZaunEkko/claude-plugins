@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.5.0 - 2026-11-11
+
+### Added
+
+- Added an optional `outputFormat` (`png`, `jpeg`, `webp`) sent as `output_format`, and the GPT Image 2.6 `complexity` setting (`low`, `medium`, `high`) on the job or in the configuration. Each is sent only when set, so a request without them keeps the shape older services accept.
+- Added per-file `format` and `formatMatched` reporting with a warning when the returned format differs from the requested one. File extensions follow the detected bytes rather than the request.
+- Added isolated tests for the default request shape, configuration and job complexity, format mismatch reporting, and rejected values.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.17`, and taught the generate skill when to set an output format or low complexity.
+
+### Not supported
+
+- SVG and animated GIF output are intentionally left out. Only GPT Image 2.6 offers them; the tested gateway refuses GIF and silently returns PNG for SVG, and other providers do not offer either. Accepting SVG would also have required screening returned markup for script before writing it into a project.
+
 ## 2.4.0 - 2026-11-09
 
 ### Added
