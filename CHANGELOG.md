@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.6.0 - 2026-11-11
+
+### Added
+
+- Added `extraParams` to `ekko-image-gen`, in the user configuration and on a job, which passes provider-specific request fields through untouched. The runner implements no provider's private fields, so a new option needs a configuration line rather than a plugin release. Fields the runner owns cannot be overridden, image edits accept only string, number, or boolean values, and results list the names sent in `extraParamNames` without echoing values.
+
+### Removed
+
+- Removed the `complexity` and `outputFormat` job fields, the `complexity` configuration field and `EKKO_IMAGE_GEN_COMPLEXITY`, `formatMatched` with its warning, and the generate-skill guidance that recommended them. Both were specific to some providers: `complexity` exists only for GPT Image 2.6, which many endpoints do not serve, and the tested gateway ignored `output_format`. Recommending them let the agent send fields a service may reject. Pass either through `extraParams` where a service supports it, for example `{ "complexity": "low" }`.
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.18`. Each saved file still reports `format`, detected from its bytes.
+
 ## 2.5.0 - 2026-11-11
 
 ### Added
