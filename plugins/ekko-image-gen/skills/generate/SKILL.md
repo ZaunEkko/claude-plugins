@@ -104,7 +104,7 @@ Supported UI-derived presets are documented in `references/request-schema.md`. P
 
 ### Provider-specific request fields
 
-Providers differ in which extra request fields they accept, and many accept none. Never add one on your own initiative, and never carry a field documented by one provider to another endpoint: a field the service does not know can fail the whole request. Use `extraParams` only when the user says their service supports a field, and prefer setting it once in the user configuration over repeating it per job. The runner passes those fields through untouched and lists their names in `extraParamNames`.
+Providers differ in which extra request fields they accept, and many accept none. Never add one on your own initiative, and never carry a field documented by one provider to another endpoint: a field the service does not know can fail the whole request. Use `extraParams` only when the user says their service supports a field, Leave quality-related fields unset by default so the service applies its own default, which for GPT Image 2.6 `complexity` is the most careful `high`; never lower one on your own. When the user wants a speed or quality trade-off, set it on that specific job, never in the user configuration, where it would pin every future image. The runner passes those fields through untouched and lists their names in `extraParamNames`.
 
 Each saved file reports `format`, detected from its bytes. When the user expected a different format, say which one actually arrived.
 

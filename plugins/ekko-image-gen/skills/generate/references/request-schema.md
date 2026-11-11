@@ -154,15 +154,16 @@ SVG and animated GIF output are intentionally not supported. Only GPT Image 2.6 
 
 Services differ in which extra request fields they accept: one may support GPT Image 2.6 `complexity`, another a seed, a style preset, or nothing at all. The runner implements none of them. `extraParams` passes any such field through untouched, so a new provider option needs a configuration line rather than a plugin release.
 
+By default nothing extra is sent and each service applies its own defaults; for GPT Image 2.6 that means `complexity` is `high`, the most careful planning. The plugin never lowers a quality-related field on its own.
+
+Set a trade-off on the one job that needs it:
+
 ```json
-{
-  "baseUrl": "https://your-openai-compatible-service.example/v1",
-  "apiKey": "replace-with-local-key",
-  "extraParams": { "complexity": "low" }
-}
+{ "id": "draft-sketch", "prompt": "...", "extraParams": { "complexity": "low" } }
 ```
 
-- Set it in the user configuration for every request to that endpoint, or on a job; a job field replaces a configuration field of the same name.
+- Put `extraParams` in the user configuration only for a field every request to that endpoint genuinely needs, such as one the provider requires. A quality or speed trade-off placed there would pin every future image, including those that should get the service's best effort.
+- A job field replaces a configuration field of the same name.
 - The runner validates only the shape: an object with non-empty field names. Whether a service accepts a field is the service's decision, and a rejection surfaces as an ordinary upstream error.
 - Fields the runner owns cannot be overridden: `model`, `prompt`, `n`, `size`, `quality`, `history_disabled`, `image`, and `image[]`. Use the dedicated job fields for those.
 - Image edits send fields as multipart form values, so values there must be strings, numbers, or booleans. Text-to-image requests accept any JSON value.
