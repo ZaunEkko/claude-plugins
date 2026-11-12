@@ -3,7 +3,7 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", "打开刚才生成的图片", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns absolute paths plus temporary loopback HTTP preview links that terminal users can Ctrl/Cmd+click without an automatic GUI launch.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.17
+version: 0.1.18
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -102,12 +102,11 @@ Choose aspect ratio and resolution from the consuming context:
 
 Supported UI-derived presets are documented in `references/request-schema.md`. Prefer a preset over manually approximating its dimensions. Treat 4K as a requested generation tier, not a guarantee that the upstream model returns exactly 3840×2160 or 2160×3840. Inspect the runner's actual `width`, `height`, and `sizeMatched` fields and report any mismatch.
 
-### Choose output format and complexity
+### Provider-specific request fields
 
-Leave `outputFormat` and `complexity` unset unless the asset calls for them; unset, the request keeps the shape every service accepts.
+Providers differ in which extra request fields they accept, and many accept none. Never add one on your own initiative, and never carry a field documented by one provider to another endpoint: a field the service does not know can fail the whole request. Use `extraParams` only when the user says their service supports a field, Leave quality-related fields unset by default so the service applies its own default, which for GPT Image 2.6 `complexity` is the most careful `high`; never lower one on your own. When the user wants a speed or quality trade-off, set it on that specific job, never in the user configuration, where it would pin every future image. The runner passes those fields through untouched and lists their names in `extraParamNames`.
 
-- Set `outputFormat` to `jpeg` or `webp` only when the consuming project needs that format. Check each file's `format` and `formatMatched` and tell the user when the requested format did not arrive.
-- Set `complexity: "low"` for bulk drafts or quick exploration where latency matters more than layout care, on services that support it. Leave it unset for dense or precise compositions.
+Each saved file reports `format`, detected from its bytes. When the user expected a different format, say which one actually arrived.
 
 This plugin does not produce SVG or animated GIF. When the user needs a vector asset, say so, and offer to write simple SVG markup directly instead of generating a raster image and calling it a vector.
 

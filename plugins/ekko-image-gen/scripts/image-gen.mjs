@@ -72,13 +72,18 @@ const MODEL_FALLBACK_MESSAGE_PATTERNS = Object.freeze([
   /\bno such\s+(?:model|deployment)\b/iu,
 ]);
 const SUPPORTED_QUALITIES = new Set(["auto", "low", "medium", "high", "xhigh", "max"]);
-const SUPPORTED_COMPLEXITIES = new Set(["low", "medium", "high"]);
-const OUTPUT_FORMAT_MIME = new Map([
-  ["png", "image/png"],
-  ["jpeg", "image/jpeg"],
-  ["webp", "image/webp"],
+// Fields the runner sets itself. extraParams may not replace them, or the
+// request sent and the result reported would disagree.
+const RESERVED_REQUEST_FIELDS = new Set([
+  "model",
+  "prompt",
+  "n",
+  "size",
+  "quality",
+  "history_disabled",
+  "image",
+  "image[]",
 ]);
-const SUPPORTED_OUTPUT_FORMATS = new Set(OUTPUT_FORMAT_MIME.keys());
 const MULTI_IMAGE_REJECTION_STATUSES = new Set([400, 422]);
 const MULTI_IMAGE_REJECTION_PARAM_PATTERN = /(?:^|\.)n$/u;
 const MULTI_IMAGE_REJECTION_MESSAGE_PATTERN =
@@ -241,7 +246,7 @@ function mergeEnvironment(fileConfig, env) {
     aspectRatio: override("EKKO_IMAGE_GEN_ASPECT_RATIO", fileConfig.aspectRatio),
     resolution: override("EKKO_IMAGE_GEN_RESOLUTION", fileConfig.resolution),
     quality: override("EKKO_IMAGE_GEN_QUALITY", fileConfig.quality),
-    complexity: override("EKKO_IMAGE_GEN_COMPLEXITY", fileConfig.complexity),
+    extraParams: fileConfig.extraParams,
     maxConcurrency: override("EKKO_IMAGE_GEN_MAX_CONCURRENCY", fileConfig.maxConcurrency),
     maxGlobalConcurrency: override(
       "EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY",
@@ -284,7 +289,7 @@ export function normalizeConfig(raw = {}, { homeDir = os.homedir() } = {}) {
     aspectRatio: size.aspectRatio,
     resolution: size.resolution,
     quality,
-    complexity: normalizeComplexity(raw.complexity, "complexity", "invalid_config"),
+    extraParams: normalizeExtraParams(raw.extraParams, "extraParams", "invalid_config"),
     maxConcurrency: boundedInteger(
       raw.maxConcurrency,
       DEFAULT_CONFIG.maxConcurrency,
@@ -482,15 +487,21 @@ function normalizeJob(raw, index, config, cwd) {
     });
   }
 
-  const outputFormat = nonEmptyString(raw.outputFormat)?.toLowerCase() ?? null;
-  if (outputFormat !== null && !SUPPORTED_OUTPUT_FORMATS.has(outputFormat)) {
-    throw new ImageGenError(`jobs[${index}].outputFormat must be png, jpeg, or webp`, {
-      code: "invalid_request",
-    });
+  // Job fields override config fields of the same name.
+  const extraParams = {
+    ...(config.extraParams ?? {}),
+    ...normalizeExtraParams(raw.extraParams, `jobs[${index}].extraParams`, "invalid_request"),
+  };
+  if (images.length > 0) {
+    for (const [name, value] of Object.entries(extraParams)) {
+      if (value === null || typeof value === "object") {
+        throw new ImageGenError(
+          `jobs[${index}].extraParams.${name} must be a string, number, or boolean for an image edit, which is sent as form fields`,
+          { code: "invalid_request" },
+        );
+      }
+    }
   }
-  const complexity = nonEmptyString(raw.complexity) === null
-    ? config.complexity
-    : normalizeComplexity(raw.complexity, `jobs[${index}].complexity`, "invalid_request");
 
   const historyDisabled = raw.historyDisabled;
   if (historyDisabled !== undefined && typeof historyDisabled !== "boolean") {
@@ -512,8 +523,7 @@ function normalizeJob(raw, index, config, cwd) {
     resolution: size.resolution,
     quality,
     count,
-    outputFormat,
-    complexity,
+    extraParams,
     historyDisabled: typeof historyDisabled === "boolean" ? historyDisabled : null,
   };
 }
@@ -859,12 +869,34 @@ function shouldFallbackModel(error) {
   return MODEL_FALLBACK_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
-function normalizeComplexity(value, field, code) {
-  const complexity = nonEmptyString(value)?.toLowerCase() ?? null;
-  if (complexity !== null && !SUPPORTED_COMPLEXITIES.has(complexity)) {
-    throw new ImageGenError(field + " must be low, medium, or high", { code });
+// Provider-specific request fields, passed through untouched. The runner
+// does not know what any provider supports, so it validates only the shape
+// and that no field the runner owns is being replaced.
+function normalizeExtraParams(value, field, code) {
+  if (value === undefined || value === null) {
+    return {};
   }
-  return complexity;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new ImageGenError(field + " must be an object of provider-specific request fields", {
+      code,
+    });
+  }
+  const params = {};
+  for (const [rawName, entry] of Object.entries(value)) {
+    const name = rawName.trim();
+    if (!name) {
+      throw new ImageGenError(field + " must not contain an empty field name", { code });
+    }
+    if (RESERVED_REQUEST_FIELDS.has(name.toLowerCase())) {
+      throw new ImageGenError(field + "." + name + " is set by the runner and cannot be overridden", {
+        code,
+      });
+    }
+    if (entry !== undefined) {
+      params[name] = entry;
+    }
+  }
+  return params;
 }
 
 function optionalBoolean(value, fallback) {
@@ -1196,22 +1228,15 @@ function splitRequestCounts(total, maximum) {
 }
 
 function generationBody(job, model, count) {
+  // Provider-specific fields go first so the runner's own fields always win.
   const body = {
+    ...job.extraParams,
     model,
     prompt: job.prompt,
     n: count,
     size: job.size,
     quality: job.quality,
   };
-  // Optional fields are sent only when set, so services that predate them
-  // keep receiving the request shape they already accept.
-  if (job.outputFormat) {
-    body.output_format = job.outputFormat;
-  }
-  if (job.complexity) {
-    body.complexity = job.complexity;
-  }
-
   if (job.historyDisabled !== null) {
     body.history_disabled = job.historyDisabled;
   }
@@ -1225,11 +1250,8 @@ function editBody(job, inputs, model, count) {
   form.append("n", String(count));
   form.append("size", job.size);
   form.append("quality", job.quality);
-  if (job.outputFormat) {
-    form.append("output_format", job.outputFormat);
-  }
-  if (job.complexity) {
-    form.append("complexity", job.complexity);
+  for (const [name, value] of Object.entries(job.extraParams ?? {})) {
+    form.append(name, String(value));
   }
   const imageField = inputs.length > 1 ? "image[]" : "image";
   for (const input of inputs) {
@@ -1378,12 +1400,8 @@ async function persistResponse(
         sizeMatched: dimensions.width === null || dimensions.height === null
           ? null
           : dimensions.width === requested.width && dimensions.height === requested.height,
-        // A service may accept output_format and still return something else;
-        // report what arrived rather than what was asked for.
+        // Detected from the saved bytes, so it reports what actually arrived.
         format: resolved.mime,
-        formatMatched: job.outputFormat
-          ? resolved.mime === OUTPUT_FORMAT_MIME.get(job.outputFormat)
-          : null,
       });
     } catch (error) {
       throw new ImageGenError(error.message, {
@@ -1431,11 +1449,7 @@ function buildJobResult(
       .map((file) =>
         `Requested ${file.requestedWidth}x${file.requestedHeight}, but the service returned ${file.width}x${file.height}`,
       ),
-    ...files
-      .filter((file) => file.formatMatched === false)
-      .map((file) =>
-        `Requested ${job.outputFormat} output, but the service returned ${file.format}`,
-      ),
+
   ];
   const result = {
     id: job.id,
@@ -1449,8 +1463,7 @@ function buildJobResult(
     aspectRatio: job.aspectRatio,
     resolution: job.resolution,
     quality: job.quality,
-    outputFormat: job.outputFormat,
-    complexity: job.complexity,
+    extraParamNames: Object.keys(job.extraParams ?? {}),
     inputCount,
     requestedCount: job.count,
     returnedCount: files.length,
@@ -1856,7 +1869,7 @@ export async function setConfiguredModels(models, options = {}) {
 }
 
 function helpText() {
-  return `Usage: node image-gen.mjs [--request FILE | --list-models | --set-models LIST]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR, EKKO_IMAGE_GEN_MODEL_DISCOVERY,\nEKKO_IMAGE_GEN_COMPLEXITY.\n`;
+  return `Usage: node image-gen.mjs [--request FILE | --list-models | --set-models LIST]\n\nRead a JSON request from FILE or stdin.\nConfiguration: ~/.claude/ekko-image-gen.local.json\nEnvironment overrides: EKKO_IMAGE_GEN_CONFIG, EKKO_IMAGE_GEN_BASE_URL,\nEKKO_IMAGE_GEN_API_KEY, EKKO_IMAGE_GEN_MODELS, EKKO_IMAGE_GEN_MODEL,\nEKKO_IMAGE_GEN_SIZE, EKKO_IMAGE_GEN_ASPECT_RATIO, EKKO_IMAGE_GEN_RESOLUTION,\nEKKO_IMAGE_GEN_QUALITY, EKKO_IMAGE_GEN_MAX_CONCURRENCY,\nEKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY, EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST,\nEKKO_IMAGE_GEN_TIMEOUT_MS, EKKO_IMAGE_GEN_QUEUE_TIMEOUT_MS,\nEKKO_IMAGE_GEN_MAX_RETRIES, EKKO_IMAGE_GEN_MAX_INPUT_BYTES,\nEKKO_IMAGE_GEN_MAX_OUTPUT_BYTES,\nEKKO_IMAGE_GEN_RUNTIME_DIR, EKKO_IMAGE_GEN_MODEL_DISCOVERY.\n`;
 }
 
 async function readStdin() {

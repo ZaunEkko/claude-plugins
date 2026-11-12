@@ -45,7 +45,6 @@ Supported environment variables:
 - `EKKO_IMAGE_GEN_ASPECT_RATIO`
 - `EKKO_IMAGE_GEN_RESOLUTION`
 - `EKKO_IMAGE_GEN_QUALITY`
-- `EKKO_IMAGE_GEN_COMPLEXITY`
 - `EKKO_IMAGE_GEN_MAX_CONCURRENCY`
 - `EKKO_IMAGE_GEN_MAX_GLOBAL_CONCURRENCY`
 - `EKKO_IMAGE_GEN_MAX_IMAGES_PER_REQUEST`
@@ -121,8 +120,7 @@ A single job object without `jobs` is accepted as shorthand.
 | `aspectRatio` | no | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, or `auto`. |
 | `resolution` | no | `1k`, `2k`, `4k`, or `auto`; only combinations exposed by the service UI are accepted. |
 | `quality` | no | `auto`, `low`, `medium`, `high`, `xhigh`, or `max`. `xhigh` and `max` are GPT Image 2.5 tiers; services that predate them reject the value upstream. |
-| `outputFormat` | no | `png`, `jpeg`, or `webp`, sent as `output_format` only when set. |
-| `complexity` | no | `low`, `medium`, or `high`: how much the model plans before rendering. Sent only when set on the job or in the configuration; GPT Image 2.6 services default to `high` when it is omitted, and services without it may reject the field. |
+| `extraParams` | no | Provider-specific request fields, merged over the configuration's `extraParams` and passed through untouched. See [Provider-specific fields](#provider-specific-fields). |
 | `count` / `n` | no | Logical images requested for this job, `1-4`; the runner may split them across upstream requests. |
 | `historyDisabled` | no | Provider-specific generation extension. When omitted, the runner does not send `history_disabled`; set a boolean only for services that document support. |
 
@@ -148,9 +146,30 @@ The runner validates uploaded bytes as PNG, JPEG, GIF, WebP, or BMP and refuses 
 
 The API may accept a requested tier while returning different actual pixel dimensions. Some gateways ignore `size` completely, returning their own fixed dimensions and orientation no matter which preset or exact `WIDTHxHEIGHT` value is sent; on those services a portrait request can come back as a landscape image, and the only way to steer composition is the prompt. Read `width`, `height`, `requestedWidth`, `requestedHeight`, and `sizeMatched` from every saved file instead of assuming the upstream honored the exact dimensions.
 
-The same holds for `outputFormat`: a gateway may accept `output_format` and still return a different format. Every saved file reports `format`, the MIME type detected from its bytes, and `formatMatched`, which is `null` when no format was requested. The file extension always follows the detected bytes, never the request, so a mismatch is saved under its real extension with a warning.
+Every saved file also reports `format`, the MIME type detected from its bytes, and its extension follows those bytes. A field passed through `extraParams` that asks for another format cannot change what a service actually returns.
 
 SVG and animated GIF output are intentionally not supported. Only GPT Image 2.6 offers them, tested gateways refuse or silently downgrade them, and other providers do not offer them at all.
+
+## Provider-specific fields
+
+Services differ in which extra request fields they accept: one may support GPT Image 2.6 `complexity`, another a seed, a style preset, or nothing at all. The runner implements none of them. `extraParams` passes any such field through untouched, so a new provider option needs a configuration line rather than a plugin release.
+
+By default nothing extra is sent and each service applies its own defaults; for GPT Image 2.6 that means `complexity` is `high`, the most careful planning. The plugin never lowers a quality-related field on its own.
+
+Set a trade-off on the one job that needs it:
+
+```json
+{ "id": "draft-sketch", "prompt": "...", "extraParams": { "complexity": "low" } }
+```
+
+- Put `extraParams` in the user configuration only for a field every request to that endpoint genuinely needs, such as one the provider requires. A quality or speed trade-off placed there would pin every future image, including those that should get the service's best effort.
+- A job field replaces a configuration field of the same name.
+- The runner validates only the shape: an object with non-empty field names. Whether a service accepts a field is the service's decision, and a rejection surfaces as an ordinary upstream error.
+- Fields the runner owns cannot be overridden: `model`, `prompt`, `n`, `size`, `quality`, `history_disabled`, `image`, and `image[]`. Use the dedicated job fields for those.
+- Image edits send fields as multipart form values, so values there must be strings, numbers, or booleans. Text-to-image requests accept any JSON value.
+- Results report the names that were sent in `extraParamNames`, never the values.
+
+No extra field is sent unless one is configured, so a request without `extraParams` keeps the exact shape every service already accepts.
 
 ## API routing
 

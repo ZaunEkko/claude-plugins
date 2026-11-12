@@ -49,7 +49,15 @@
 
 `quality` 可用 `auto / low / medium / high / xhigh / max`。`xhigh` 与 `max` 由 GPT Image 2.5 引入，早于 2.5 的服务会直接拒绝这两个值。
 
-两个可选项只在你明确要求时才发送：`outputFormat` 可选 `png / jpeg / webp`，`complexity` 用 `low / medium / high` 控制 GPT Image 2.6 出图前的规划程度。结果里的 `format` 与 `formatMatched` 反映实际收到的格式，文件扩展名也按实际字节决定。插件不支持 SVG 和 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，换成其他服务商更不可能有。
+各家服务商支持的额外参数都不一样，有的还没有 GPT Image 2.6 模型，所以插件不内置任何一家的私有参数。默认不发送任何额外字段，由服务商使用自己的默认值；以 GPT Image 2.6 为例，`complexity` 默认就是 `high`，即最高的规划程度。插件不会主动降低任何与画质有关的参数。
+
+确实想对某张图做取舍时，只写在那个 job 上：
+
+```json
+{ "id": "draft-sketch", "prompt": "...", "extraParams": { "complexity": "low" } }
+```
+
+只有该服务**每个请求都必须带**的字段才适合写进配置文件的 `extraParams`。`complexity` 这类画质与速度的取舍不要写进配置，否则之后所有图片都会被固定在这个档位。`model`、`prompt`、`n`、`size`、`quality` 等由插件自己管理的字段不能通过它覆盖。结果里的 `format` 反映实际收到的格式，文件扩展名也按实际字节决定。插件不支持 SVG 和 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，换成其他服务商更不可能有。
 
 ## 示例
 
@@ -142,7 +150,7 @@ claude plugin install ekko-image-gen@zaunekko --scope user
 - `unknown_parameter` 且消息指向 `n`：服务不接受单次多图，常见于把 Images API 转译成 Responses API `image_generation` 工具的网关。runner 会自动改用单图重发并记录告警；若仍失败，显式设置 `maxImagesPerRequest: 1`。
 - `model_not_found` 或提示模型在当前分组不可用：确认该 API Key 所属分组已开通图像模型。runner 会沿配置链尝试下一个模型，全部失败才报错，错误详情中的 `modelAttempts` 会列出每个模型的实际状态。
 - `quality must be auto, low, medium, high, xhigh, or max`：传入了不支持的画质值；`xhigh` 与 `max` 需要服务端支持 GPT Image 2.5。
-- 出现 `Requested webp output, but the service returned image/png` 这类告警：服务接受了 `outputFormat` 但没有执行，这是服务端行为，文件已按实际格式保存。
+- 加了 `extraParams` 之后请求报错：该服务不认识这个字段。把它从配置里删掉即可；插件不会替你判断哪家支持哪个参数。
 - 点击预览链接无响应：确认终端允许 Ctrl/Cmd+点击普通 HTTP URL，并检查链接是否已超过 15 分钟；过期后可要求重新创建预览链接。
 - `preview_start_failed`：临时 loopback 服务未能启动；图片仍已成功生成，请使用绝对路径。
 - SSH / 容器 / 远程开发：`127.0.0.1` 可能指向 Claude Code 所在主机而不是浏览器所在主机；使用端口转发或绝对路径。
