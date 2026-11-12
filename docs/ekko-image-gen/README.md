@@ -49,13 +49,15 @@
 
 `quality` 可用 `auto / low / medium / high / xhigh / max`。`xhigh` 与 `max` 由 GPT Image 2.5 引入，早于 2.5 的服务会直接拒绝这两个值。
 
-各家服务商支持的额外参数都不一样，有的还没有 GPT Image 2.6 模型，所以插件不内置任何一家的私有参数。如果你的服务支持某个额外参数，在配置里通过 `extraParams` 写上，插件会原样转发：
+各家服务商支持的额外参数都不一样，有的还没有 GPT Image 2.6 模型，所以插件不内置任何一家的私有参数。默认不发送任何额外字段，由服务商使用自己的默认值；以 GPT Image 2.6 为例，`complexity` 默认就是 `high`，即最高的规划程度。插件不会主动降低任何与画质有关的参数。
+
+确实想对某张图做取舍时，只写在那个 job 上：
 
 ```json
-{ "extraParams": { "complexity": "low" } }
+{ "id": "draft-sketch", "prompt": "...", "extraParams": { "complexity": "low" } }
 ```
 
-不写就不会发送任何额外字段。`model`、`prompt`、`n`、`size`、`quality` 等由插件自己管理的字段不能通过它覆盖。结果里的 `format` 反映实际收到的格式，文件扩展名也按实际字节决定。插件不支持 SVG 和 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，换成其他服务商更不可能有。
+只有该服务**每个请求都必须带**的字段才适合写进配置文件的 `extraParams`。`complexity` 这类画质与速度的取舍不要写进配置，否则之后所有图片都会被固定在这个档位。`model`、`prompt`、`n`、`size`、`quality` 等由插件自己管理的字段不能通过它覆盖。结果里的 `format` 反映实际收到的格式，文件扩展名也按实际字节决定。插件不支持 SVG 和 GIF：只有 GPT Image 2.6 提供，实测网关会拒绝或静默降级，换成其他服务商更不可能有。
 
 ## 示例
 

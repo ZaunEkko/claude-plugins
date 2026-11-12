@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
-- Removed the `complexity` and `outputFormat` job fields, the `complexity` configuration field and `EKKO_IMAGE_GEN_COMPLEXITY`, `formatMatched` with its warning, and the generate-skill guidance that recommended them. Both were specific to some providers: `complexity` exists only for GPT Image 2.6, which many endpoints do not serve, and the tested gateway ignored `output_format`. Recommending them let the agent send fields a service may reject. Pass either through `extraParams` where a service supports it, for example `{ "complexity": "low" }`.
+- Removed the `complexity` and `outputFormat` job fields, the `complexity` configuration field and `EKKO_IMAGE_GEN_COMPLEXITY`, `formatMatched` with its warning, and the generate-skill guidance that recommended them. Both were specific to some providers: `complexity` exists only for GPT Image 2.6, which many endpoints do not serve, and the tested gateway ignored `output_format`. Recommending them let the agent send fields a service may reject. Pass either through a job's `extraParams` where a service supports it; left unset, the service default applies, which for `complexity` is `high`. The generate skill never lowers a quality-related field on its own and never pins one in the user configuration.
 
 ### Changed
 
