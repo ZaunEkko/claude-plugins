@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.6.1 - 2026-11-12
+
+### Changed
+
+- Bumped `ekko-image-gen` to `0.1.19`. The generate skill now sets `quality` on every job: an instruction the user gives in the conversation wins and persists until changed; otherwise the agent picks per job, defaulting to `high` for anything delivered and lowering it only for explicit drafts or exploration. `xhigh` and `max` are used only when the user asks for the best and the model supports them, with a fallback to `high` on rejection. A quality-driven review failure raises quality before escalating the model tier.
+- The image worker now keeps the quality the parent assigned and reports it.
+
 ## 2.6.0 - 2026-11-11
 
 ### Added

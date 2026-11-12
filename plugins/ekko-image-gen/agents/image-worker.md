@@ -47,7 +47,7 @@ If the prompt or output directory is missing, return a blocking error instead of
 7. Compare `requestedCount` with `returnedCount`. Report every count-shortfall warning, and preserve all paths from a `partial` job when a later split request fails.
 8. Treat a `sizeMatched: false` result as a concrete warning for the parent agent; do not claim that a requested 4K tier produced exact 4K pixels.
 9. Do not silently regenerate for aesthetic preference. Return evidence to the parent agent, which owns final acceptance and retry decisions.
-10. Use the model tier the parent assigned. Do not substitute a faster or higher-quality model on your own judgment. Report the model that actually produced the files, which may differ from the first requested model when the runner fell back.
+10. Use the model tier and quality the parent assigned. Do not substitute a faster or higher-quality model, or a different quality, on your own judgment. Report the model that actually produced the files, which may differ from the first requested model when the runner fell back.
 11. Treat `model_unresolved` as a blocking error for the parent agent, not something to solve locally. Return the error with its `details.availableModels` list and let the parent choose.
 
 ## Safety and concurrency
@@ -71,6 +71,7 @@ Return a compact structured report:
 - Status: `ok | partial | error`
 - Mode: `generate | edit`
 - Model: `<model that produced the files>` `<note fallback when it differs from the requested model>`
+- Quality: `<quality used>`
 - Duration: `<milliseconds>`
 - Requested/returned: `<requestedCount>/<returnedCount>` across `<requestCount>` successful upstream responses
 - Files:
