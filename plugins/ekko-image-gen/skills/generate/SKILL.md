@@ -3,7 +3,7 @@ name: generate
 description: This skill should be used when the user asks to "生成图片", "文生图", "图生图", "根据这张图修改", "创建游戏素材", "生成前端图片资源", "批量生成素材", "打开刚才生成的图片", or invokes `/ekko-image-gen:generate`. It plans context-aware output locations, accepts images pasted into the current Claude Code message, coordinates parallel image-worker agents, reviews generated files, and returns absolute paths plus temporary loopback HTTP preview links that terminal users can Ctrl/Cmd+click without an automatic GUI launch.
 argument-hint: "<图片需求；可附图，也可说明输出目录、尺寸、数量或风格>"
 allowed-tools: Read, Glob, Grep, Bash, Agent
-version: 0.1.18
+version: 0.1.19
 ---
 
 # Generate images with an OpenAI-compatible service
@@ -50,7 +50,7 @@ Create a concise job specification for each independent asset:
 - reference image list;
 - model priority or a strict model override when needed;
 - aspect ratio, resolution tier, or explicit size;
-- quality and count from 1 to 4 when overriding local defaults;
+- quality chosen for this job as described in [Choose quality per job](#choose-quality-per-job), and count from 1 to 4;
 - `historyDisabled` only when the configured provider explicitly supports that extension; omit it for the standard request shape;
 - concrete acceptance criteria.
 
@@ -85,6 +85,26 @@ When the endpoint exposes only one image model, every job uses it; say so rather
 Set the tier through the job's `model` field and leave fallback enabled, so an endpoint that does not expose that model still resolves through the configured chain. Reserve `strictModel: true` for a user who requires one exact model.
 
 Do not escalate a whole batch to the quality tier by default. The cost of escalation is latency rather than price, and the bounded worker count is what limits a large asset set. Escalate the few assets that carry the result.
+
+### Choose quality per job
+
+Set `quality` on every job explicitly instead of leaving it to the configured default. Decide it in this order:
+
+1. **The user's instruction in this conversation.** When the user names a quality, such as "use high for this batch", "drafts are fine", or "best quality", apply it to every job it covers and keep applying it until the user changes it. It overrides everything below.
+2. **The job's role**, when the user has said nothing:
+
+| Job | Quality |
+|---|---|
+| Anything delivered to the user: final assets, hero art, icons and sprites for a real project, identity-preserving edits | `high` |
+| Explicit drafts, layout or style probes, and throwaway exploration before the direction is fixed | `low` or `medium` |
+
+Default to the best result. Lower quality only for work the user or the task plainly treats as disposable, never to save time on an asset the user will keep.
+
+`xhigh` and `max` exist only on newer models such as GPT Image 2.5 and later, and other services reject them. Use them only when the user asks for the very best quality and the resolved model is known to support them. If the service rejects the value, retry that job at `high` and tell the user which quality was actually used.
+
+Treat provider-specific quality fields passed through `extraParams`, such as GPT Image 2.6 `complexity`, the same way: set one on a job only when the user asks for it and says the service supports it. Left unset, the service's own default applies.
+
+Report the quality used for each asset, so the user can ask for a different one next time.
 
 ### Choose and report dimensions
 
@@ -149,7 +169,7 @@ Do not parallelize multiple speculative retries for the same asset. Generate, in
 4. Check subject, composition, dimensions, background intent, legibility, unwanted text, obvious artifacts, identity preservation, and consistency with neighboring assets.
 5. Compare `requestedCount` with `returnedCount`, surface count-shortfall warnings, and preserve every file from a `partial` job.
 6. Accept compliant images.
-7. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration. When the failure is rendering quality rather than a prompt defect, such as soft detail, mangled small features, or an imprecise edit, escalate that one job to the chain's quality tier instead of only rewording the prompt.
+7. For a failed review, write one targeted correction prompt and regenerate only the affected job. Default to at most two quality retries unless the user requests broader exploration. When the failure is rendering quality rather than a prompt defect, such as soft detail, mangled small features, or an imprecise edit, first raise that job's `quality` to `high` if it was lower, then escalate it to the chain's quality tier, instead of only rewording the prompt. Do not raise quality above what the user explicitly asked for.
 8. Never delete a rejected output automatically. Keep it available unless the user explicitly asks for cleanup.
 
 ## Create clickable preview links

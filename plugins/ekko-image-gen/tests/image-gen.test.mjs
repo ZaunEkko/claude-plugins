@@ -147,7 +147,7 @@ test("documents temporary loopback previews without automatic GUI launch", async
   const marketplaceEntry = marketplace.plugins.find(({ name }) => name === "ekko-image-gen");
   const combinedGuidance = [skill, worker, placement, readme, ...publicDocs].join("\n");
 
-  assert.equal(manifest.version, "0.1.18");
+  assert.equal(manifest.version, "0.1.19");
   assert.match(manifest.description, /temporary loopback HTTP preview links/u);
   assert.ok(marketplaceEntry);
   assert.match(marketplaceEntry.description, /temporary loopback HTTP preview links/u);
