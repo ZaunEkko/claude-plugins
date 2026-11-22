@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.6.2 - 2026-11-22
+
+### Fixed
+
+- Bumped `commit-commands` to `2.0.4`. Its SessionStart hook appended `export CLAUDE_COMMIT_COMMANDS_STATE_FILE=...` to `CLAUDE_ENV_FILE` on every startup, resume, and compaction, and Claude Code never truncates that per-session file, so a long session accumulated duplicate lines until, on Windows, every Bash tool call failed with `unexpected EOF while looking for matching '`. The hook now appends only when the last state-file export in the file differs from the one it would write.
+
 ## 2.6.1 - 2026-11-12
 
 ### Changed
