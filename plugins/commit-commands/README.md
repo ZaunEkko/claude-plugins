@@ -117,7 +117,7 @@ Behavioral boundaries:
 
 ## Session state and privacy
 
-A SessionStart hook creates a per-session state file in a private directory under the operating-system temporary directory. When Claude Code exposes `CLAUDE_ENV_FILE`, the hook also exports the exact state path for later Bash calls. If that export is unavailable, the resolver deterministically derives the same SHA-256 state filename from `CLAUDE_CODE_SESSION_ID`. A deliberately detached caller can pass `--claude-state-file <exact-path>` to the wrapper; that explicit path is validated inside the private state directory and used exclusively, so an invalid path fails before Git and cannot fall through to another concurrent session. The plugin never selects the newest state file globally.
+A SessionStart hook creates a per-session state file in a private directory under the operating-system temporary directory. When Claude Code exposes `CLAUDE_ENV_FILE`, the hook also exports the exact state path for later Bash calls, skipping the write when the file already ends with that export so resume and compaction do not grow it. If that export is unavailable, the resolver deterministically derives the same SHA-256 state filename from `CLAUDE_CODE_SESSION_ID`. A deliberately detached caller can pass `--claude-state-file <exact-path>` to the wrapper; that explicit path is validated inside the private state directory and used exclusively, so an invalid path fails before Git and cannot fall through to another concurrent session. The plugin never selects the newest state file globally.
 
 The state contains only:
 
