@@ -60,6 +60,34 @@ test("captures isolated session state and appends a safely quoted environment ex
   assert.equal(captureSessionEnd({ session_id: "missing" }, { tmpDirectory }), false);
 });
 
+test("repeated SessionStart events do not grow the environment file", (t) => {
+  const tmpDirectory = temporaryDirectory(t);
+  const envFile = path.join(tmpDirectory, "env");
+  fs.writeFileSync(envFile, "export UNRELATED=1\r\n", "utf8");
+  const options = { tmpDirectory, envFile, now: Date.UTC(2026, 10, 22) };
+
+  // startup, then resume and compaction re-fire SessionStart for the same session.
+  const stateA = captureSessionStart({ session_id: "same session" }, options);
+  captureSessionStart({ session_id: "same session" }, options);
+  captureSessionStart({ session_id: "same session" }, options);
+
+  const lineA = `export CLAUDE_COMMIT_COMMANDS_STATE_FILE=${shellQuote(stateA)}`;
+  assert.deepEqual(fs.readFileSync(envFile, "utf8").split(/\r?\n/u), ["export UNRELATED=1", lineA, ""]);
+
+  // A different session takes over, then the first one returns: its export must
+  // be appended again because the last export is the one Bash ends up with.
+  const stateB = captureSessionStart({ session_id: "other session" }, options);
+  captureSessionStart({ session_id: "same session" }, options);
+  const lineB = `export CLAUDE_COMMIT_COMMANDS_STATE_FILE=${shellQuote(stateB)}`;
+  assert.deepEqual(fs.readFileSync(envFile, "utf8").split(/\r?\n/u), [
+    "export UNRELATED=1",
+    lineA,
+    lineB,
+    lineA,
+    "",
+  ]);
+});
+
 test("allows hook input without a startup model and rejects control-character injection", (t) => {
   const tmpDirectory = temporaryDirectory(t);
   const stateFile = captureSessionStart(

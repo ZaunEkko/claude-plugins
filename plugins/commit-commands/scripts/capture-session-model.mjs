@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 
 export const STATE_DIRECTORY_NAME = "claude-code-commit-commands";
 export const DEFAULT_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const STATE_FILE_EXPORT_PREFIX = "export CLAUDE_COMMIT_COMMANDS_STATE_FILE=";
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
 
@@ -174,14 +175,35 @@ export function captureSessionStart(
 
   if (envFile) {
     const safeEnvFile = assertSafeString(envFile, "CLAUDE_ENV_FILE", { maxLength: 32768 });
-    fs.appendFileSync(
-      safeEnvFile,
-      `export CLAUDE_COMMIT_COMMANDS_STATE_FILE=${shellQuote(stateFile)}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    const exportLine = `${STATE_FILE_EXPORT_PREFIX}${shellQuote(stateFile)}`;
+    // SessionStart fires again on resume and compaction, and Claude Code never
+    // truncates the per-session env file, so append only when the export that
+    // currently wins (the last one) differs from ours.
+    if (lastStateFileExport(safeEnvFile) !== exportLine) {
+      fs.appendFileSync(safeEnvFile, `${exportLine}\n`, { encoding: "utf8", mode: 0o600 });
+    }
   }
 
   return stateFile;
+}
+
+function lastStateFileExport(envFile) {
+  let contents;
+  try {
+    contents = fs.readFileSync(envFile, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  const lines = contents.split(/\r?\n/u);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].startsWith(STATE_FILE_EXPORT_PREFIX)) {
+      return lines[index];
+    }
+  }
+  return null;
 }
 
 export function captureSessionEnd(input, { tmpDirectory = os.tmpdir() } = {}) {
